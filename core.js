@@ -11,9 +11,9 @@ class AppErr extends Error{constructor(code){super(ERR[code]||code);this.code=co
 let onSessionExpired=()=>{};
 async function rpc(fn,args={}){
   if(DEMO){const j=await Demo.call(fn,args);if(j&&j.error)throw new AppErr(j.error);return j}
-  const h={"apikey":CFG.SUPABASE_KEY,"Content-Type":"application/json"};
+  CFG.SUPABASE_KEY=String(CFG.SUPABASE_KEY).trim();const h={"apikey":CFG.SUPABASE_KEY,"Content-Type":"application/json"};
   if(!CFG.SUPABASE_KEY.startsWith("sb_"))h.Authorization="Bearer "+CFG.SUPABASE_KEY;
-  let r;try{r=await fetch(CFG.SUPABASE_URL.replace(/\/$/,"")+"/rest/v1/rpc/"+fn,{method:"POST",headers:h,body:JSON.stringify(args)})}catch(e){throw new AppErr("NETWORK")}
+  let r;try{r=await fetch(String(CFG.SUPABASE_URL).trim().replace(/\/+$/,"").replace(/\/rest\/v1$/,"")+"/rest/v1/rpc/"+fn,{method:"POST",headers:h,body:JSON.stringify(args)})}catch(e){throw new AppErr("NETWORK")}
   const t=await r.text();let j=null;try{j=t?JSON.parse(t):null}catch(e){}
   if(!r.ok){const m=(j&&j.message)||"";const code=Object.keys(ERR).find(k=>m.includes(k));if(code==="SESSION_EXPIRED")onSessionExpired();throw new AppErr(code||m||("오류 "+r.status))}
   if(j&&j.error)throw new AppErr(j.error);
@@ -43,17 +43,25 @@ const Demo={
   lg_change_secret(d,{p_token,p_old,p_new}){const s=this.auth(d,p_token);const u=(s.role==="admin"?d.admins:d.drivers).find(x=>x.id===s.uid);
     if(s.role==="driver"){if(!/^[0-9]{4,6}$/.test(p_new))throw new AppErr("PIN_FORMAT");if(u.pin!==p_old)throw new AppErr("WRONG_OLD");u.pin=p_new}
     else{if((p_new||"").length<6)throw new AppErr("PW_FORMAT");if(u.pw!==p_old)throw new AppErr("WRONG_OLD");u.pw=p_new}u.must_change=false},
-  lg_trips(d,{p_token,p_month}){const s=this.auth(d,p_token);return d.trips.filter(t=>t.trip_date.slice(0,7)===p_month&&(s.role==="admin"||t.driver_id===s.uid)).sort((a,b)=>a.trip_date.localeCompare(b.trip_date)||a.created_at.localeCompare(b.created_at))},
+  lg_trips(d,{p_token,p_month}){const s=this.auth(d,p_token);return d.trips.map(t=>this.hide(s,t)).filter(t=>t.trip_date.slice(0,7)===p_month&&(s.role==="admin"||t.driver_id===s.uid)).sort((a,b)=>a.trip_date.localeCompare(b.trip_date)||a.created_at.localeCompare(b.created_at))},
   lg_last_trip(d,{p_token,p_driver}){const s=this.auth(d,p_token);const did=s.role==="admin"?p_driver:s.uid;
-    return d.trips.filter(t=>t.driver_id===did).sort((a,b)=>b.trip_date.localeCompare(a.trip_date)||b.created_at.localeCompare(a.created_at))[0]||null},
+    return this.hide(s,d.trips.filter(t=>t.driver_id===did).sort((a,b)=>b.trip_date.localeCompare(a.trip_date)||b.created_at.localeCompare(a.created_at))[0]||null)},
   lg_places(d,{p_token}){const s=this.auth(d,p_token);const c={};d.trips.filter(t=>s.role==="admin"||t.driver_id===s.uid).forEach(t=>["from_name","client","dest","via1","via2","via3","via4"].forEach(k=>{if(t[k])c[t[k]]=(c[t[k]]||0)+1}));
     return Object.keys(c).sort((a,b)=>c[b]-c[a]).slice(0,150)},
+  hide(s,t){if(!t||s.role==="admin")return t;const c={...t};delete c.per_run;delete c.fuel;delete c.night;return c},
   lg_trip_save(d,{p_token,p_trip}){const s=this.auth(d,p_token);const did=s.role==="admin"?p_trip.driver_id:s.uid;
     if(!d.drivers.find(x=>x.id===did))throw new AppErr("NO_DRIVER");if(!p_trip.trip_date)throw new AppErr("NO_DATE");
-    const f={};["from_name","client","dest","via1","via2","via3","via4","start_time","end_time","memo"].forEach(k=>f[k]=p_trip[k]||"");["per_run","fuel","night"].forEach(k=>f[k]=Number(p_trip[k])||0);f.cnt=parseInt(p_trip.cnt??1)||0;
-    const now=new Date().toISOString();
-    if(p_trip.id){const t=d.trips.find(x=>x.id===p_trip.id&&(s.role==="admin"||x.driver_id===s.uid));if(!t)throw new AppErr("NOT_FOUND");Object.assign(t,f,{driver_id:did,trip_date:p_trip.trip_date,updated_at:now});return t}
-    const t={id:this.uid(),driver_id:did,trip_date:p_trip.trip_date,...f,entered_by:s.role,created_at:now,updated_at:now};d.trips.push(t);return t},
+    const f={};["from_name","client","dest","via1","via2","via3","via4","start_time","end_time","memo"].forEach(k=>f[k]=p_trip[k]||"");f.cnt=parseInt(p_trip.cnt??1)||0;
+    const rate=(d.rates||{})[f.dest]||{};const now=new Date().toISOString();
+    const old=p_trip.id?d.trips.find(x=>x.id===p_trip.id&&(s.role==="admin"||x.driver_id===s.uid)):null;if(p_trip.id&&!old)throw new AppErr("NOT_FOUND");
+    if(s.role==="admin"){f.per_run=p_trip.per_run!=null?Number(p_trip.per_run)||0:Number(rate.per_run)||0;f.fuel=p_trip.fuel!=null?Number(p_trip.fuel)||0:Number(rate.fuel)||0;f.night=Number(p_trip.night)||0}
+    else if(!old||old.dest!==f.dest){f.per_run=Number(rate.per_run)||0;f.fuel=Number(rate.fuel)||0;f.night=old?old.night:0}
+    else{f.per_run=old.per_run;f.fuel=old.fuel;f.night=old.night}
+    if(old){Object.assign(old,f,{driver_id:did,trip_date:p_trip.trip_date,updated_at:now});return this.hide(s,old)}
+    const t={id:this.uid(),driver_id:did,trip_date:p_trip.trip_date,...f,entered_by:s.role,created_at:now,updated_at:now};d.trips.push(t);return this.hide(s,t)},
+  lg_rates_list(d,{p_token}){this.auth(d,p_token,"admin");return Object.entries(d.rates||{}).map(([dest,r])=>({dest,per_run:r.per_run,fuel:r.fuel}))},
+  lg_rates_save(d,{p_token,p_rates}){this.auth(d,p_token,"admin");d.rates=d.rates||{};(p_rates||[]).forEach(r=>{if(!r.dest)return;if(!num(r.per_run)&&!num(r.fuel))delete d.rates[r.dest];else d.rates[r.dest]={per_run:num(r.per_run),fuel:num(r.fuel)}})},
+  lg_rates_apply(d,{p_token,p_month,p_overwrite}){this.auth(d,p_token,"admin");let n=0;d.trips.forEach(t=>{const r=(d.rates||{})[t.dest];if(r&&t.trip_date.slice(0,7)===p_month&&(p_overwrite||(!t.per_run&&!t.fuel))){t.per_run=r.per_run;t.fuel=r.fuel;n++}});return n},
   lg_trip_delete(d,{p_token,p_id}){const s=this.auth(d,p_token);const i=d.trips.findIndex(x=>x.id===p_id&&(s.role==="admin"||x.driver_id===s.uid));if(i<0)throw new AppErr("NOT_FOUND");d.trips.splice(i,1)},
   lg_drivers_list(d,{p_token}){this.auth(d,p_token,"admin");return d.drivers.map(x=>({id:x.id,login_id:x.login_id,name:x.name,manager:x.manager,active:x.active,sort:x.sort,must_change:x.must_change,
     phone:x.phone||"",car_no:x.car_no||"",note:x.note||"",locked:x.locked>Date.now(),created_at:x.created_at,
@@ -91,6 +99,7 @@ function dayName(date){return "일월화수목금토"[new Date(date+"T00:00").ge
 function toast(m){const el=document.getElementById("toast");el.textContent=m;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,2600)}
 const ICON={dash:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',add:'<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   drivers:'<path d="M3 16V7h11v9M14 10h4l3 3v3h-7"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>',me:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+  won:'<path d="M3 7l3 10 3-8 3 8 3-8 3 8 3-10"/><path d="M2 11h20M2 14h20"/>',
   userplus:'<circle cx="9" cy="8" r="4"/><path d="M2 21c1-4 3.5-6 7-6s6 2 7 6M19 8v6M16 11h6"/>'};
 const svgIcon=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
 
@@ -101,42 +110,54 @@ const FIELDS=["trip_date","from_name","dest","via1","via2","via3","via4","cnt","
 function sel(list,cur,ph){const opts=[...list];if(cur&&!opts.includes(cur))opts.push(cur);return `<option value="">${esc(ph)}</option>`+opts.map(x=>`<option value="${esc(x)}" ${x===cur?"selected":""}>${esc(x)}${list.includes(x)?"":" (목록에 없음)"}</option>`).join("")}
 function blankTrip(month,driverId){return{driver_id:driverId||"",trip_date:month===ym(new Date())?today():month+"-01",from_name:LS.get("lg_last_origin")||ORIGINS[0]||"",dest:"",via1:"",via2:"",via3:"",via4:"",cnt:1,per_run:"",fuel:"",start_time:"",end_time:"",night:"",memo:""}}
 function tripForm(box,o){
-  const f=o.form,ed=!!o.editing,admin=!!o.drivers;let confirmDel=false;
+  // 기사님: 운행 정보만 입력 (금액 칸 없음, 금액은 관리자 단가표로 자동)
+  // 관리자: 금액까지 입력. 납품거래처를 고르면 단가표 금액이 자동으로 채워짐
+  const f=o.form,ed=!!o.editing,admin=!!o.drivers,rates=o.rates||{};let confirmDel=false;
+  const FLD=admin?FIELDS:FIELDS.filter(k=>!["per_run","fuel","night"].includes(k));
   const draw=()=>{
     const pick=admin?`<label>기사님<select id="driver_id"><option value="">기사님 선택</option>${[...new Set(o.drivers.map(d=>d.manager||"미지정"))].map(mg=>`<optgroup label="담당 ${esc(mg)}">${o.drivers.filter(d=>(d.manager||"미지정")===mg&&(d.active||d.id===f.driver_id)).map(d=>`<option value="${esc(d.id)}" ${f.driver_id===d.id?"selected":""}>${esc(d.name)}</option>`).join("")}</optgroup>`).join("")}</select></label>`:"";
     const hasVia=f.via1||f.via2||f.via3||f.via4;
+    const cntBox=`<label>납품 횟수<div class="stepper"><button type="button" id="cm" aria-label="횟수 줄이기">−</button><input type="number" id="cnt" inputmode="numeric" min="0" value="${esc(f.cnt)}"><button type="button" id="cp" aria-label="횟수 늘리기">+</button></div></label>`;
     box.innerHTML=`<form class="card tf" autocomplete="off">${pick}
       <div class="grid2"><label>운행일<input type="date" id="trip_date" value="${esc(f.trip_date)}" required></label><label><span>&nbsp;</span><button type="button" class="btn" id="copyLast">지난 입력 복사</button></label></div>
       <label>출발지<select id="from_name">${sel(ORIGINS,f.from_name,"출발지 선택")}</select></label>
       <label>납품거래처<select id="dest" required>${sel(DESTS,f.dest,"납품거래처 선택")}</select></label>
       <details ${hasVia?"open":""}><summary>경유지 넣기 (최대 4곳)</summary><div class="grid2">${[1,2,3,4].map(i=>`<label>경유${i}<select id="via${i}">${sel(DESTS,f["via"+i],"없음")}</select></label>`).join("")}</div></details>
-      <div class="grid3">
-        <label>횟수<div class="stepper"><button type="button" id="cm" aria-label="횟수 줄이기">−</button><input type="number" id="cnt" inputmode="numeric" min="0" value="${esc(f.cnt)}"><button type="button" id="cp" aria-label="횟수 늘리기">+</button></div></label>
+      ${admin?`<div class="grid3">${cntBox}
         <label>회당운행비<input type="number" id="per_run" inputmode="numeric" min="0" step="100" value="${esc(f.per_run)}" placeholder="0"></label>
         <label>유류비지원금<input type="number" id="fuel" inputmode="numeric" min="0" step="100" value="${esc(f.fuel)}" placeholder="회당"></label></div>
-      <div class="grid3"><label>운행 시작<input type="time" id="start_time" value="${esc(f.start_time)}"></label><label>운행 종료<input type="time" id="end_time" value="${esc(f.end_time)}"></label><label>야간수당<input type="number" id="night" inputmode="numeric" min="0" step="100" value="${esc(f.night)}" placeholder="0"></label></div>
-      <label>비고<textarea id="memo">${esc(f.memo)}</textarea></label>
+        <div class="grid3"><label>운행 시작<input type="time" id="start_time" value="${esc(f.start_time)}"></label><label>운행 종료<input type="time" id="end_time" value="${esc(f.end_time)}"></label><label>야간수당<input type="number" id="night" inputmode="numeric" min="0" step="100" value="${esc(f.night)}" placeholder="0"></label></div>`
+      :`<div class="grid3">${cntBox}<label>운행 시작<input type="time" id="start_time" value="${esc(f.start_time)}"></label><label>운행 종료<input type="time" id="end_time" value="${esc(f.end_time)}"></label></div>`}
+      <label>비고<textarea id="memo" placeholder="${admin?"":"특이사항이 있으면 적어 주세요"}">${esc(f.memo)}</textarea></label>
       <div class="calc" id="calc"></div>
       <div class="row"><button class="btn primary big" id="save" type="submit">${ed?"수정 저장":"저장"}</button>${ed||o.onCancel?'<button type="button" class="btn big" id="cancel">취소</button>':""}</div>
       ${ed?(confirmDel?`<div class="confirm"><span>이 운행 내역을 삭제할까요? 되돌릴 수 없습니다.</span><div class="row"><button type="button" class="btn danger" id="delYes">삭제</button><button type="button" class="btn" id="delNo">그대로 두기</button></div></div>`:'<button type="button" class="btn danger" id="del">이 내역 삭제</button>'):""}
     </form>`;
     const $=id=>box.querySelector("#"+id);
-    const read=()=>{FIELDS.forEach(k=>f[k]=$(k).value);if(admin)f.driver_id=$("driver_id").value};
-    const upd=()=>{read();const c=calc(f);$("calc").innerHTML=`<span>운행비 합계 (${num(f.cnt)}회 × ${won(f.per_run)})</span><b>${won(c.run)}원</b><span>유류비합계 (${num(f.cnt)}회 × ${won(f.fuel)})</span><b>${won(c.fuel)}원</b><span>야간수당</span><b>${won(c.night)}원</b><span class="tot">정산액</span><b class="tot">${won(c.total)}원</b>`};
-    const form=box.querySelector("form");form.addEventListener("input",upd);form.addEventListener("change",upd);upd();
+    const read=()=>{FLD.forEach(k=>f[k]=$(k).value);if(admin)f.driver_id=$("driver_id").value};
+    const upd=()=>{read();
+      if(admin){const c=calc(f);$("calc").innerHTML=`<span>운행비 합계 (${num(f.cnt)}회 × ${won(f.per_run)})</span><b>${won(c.run)}원</b><span>유류비합계 (${num(f.cnt)}회 × ${won(f.fuel)})</span><b>${won(c.fuel)}원</b><span>야간수당</span><b>${won(c.night)}원</b><span class="tot">정산액</span><b class="tot">${won(c.total)}원</b>`}
+      else $("calc").innerHTML=`<span class="tot" style="border:0;padding:0;margin:0">${f.trip_date?esc(f.trip_date.slice(5).replace("-","/"))+" ("+dayName(f.trip_date)+") · ":""}${esc(f.dest||"납품거래처를 고르세요")}</span><b class="tot" style="border:0;padding:0;margin:0">${num(f.cnt)}회</b>`};
+    const form=box.querySelector("form");form.addEventListener("input",upd);form.addEventListener("change",upd);
+    if(admin){let lastDest=f.dest;$("dest").addEventListener("change",()=>{const r=rates[$("dest").value],pr=rates[lastDest];
+      const blank=!num($("per_run").value)&&!num($("fuel").value),same=pr&&num($("per_run").value)===num(pr.per_run)&&num($("fuel").value)===num(pr.fuel);
+      if(r&&(blank||same)){$("per_run").value=r.per_run;$("fuel").value=r.fuel;toast("단가표 금액을 넣었습니다")}lastDest=$("dest").value;upd()});}
+    upd();
     $("cm").onclick=()=>{$("cnt").value=Math.max(0,num($("cnt").value)-1);upd()};
     $("cp").onclick=()=>{$("cnt").value=num($("cnt").value)+1;upd()};
     $("copyLast").onclick=async()=>{read();if(admin&&!f.driver_id)return toast("기사님을 먼저 선택해 주세요");
       try{const t=await rpc("lg_last_trip",{p_token:o.token,p_driver:admin?f.driver_id:null});if(!t)return toast("지난 입력이 없습니다");
-        ["from_name","dest","via1","via2","via3","via4","cnt","per_run","fuel","start_time","end_time","night"].forEach(k=>{const el=$(k);if(el.tagName==="SELECT"&&t[k]&&![...el.options].some(x=>x.value===t[k]))el.add(new Option(t[k]+" (목록에 없음)",t[k]));el.value=t[k]??""});
+        ["from_name","dest","via1","via2","via3","via4","cnt","per_run","fuel","start_time","end_time","night"].filter(k=>$(k)).forEach(k=>{const el=$(k);if(el.tagName==="SELECT"&&t[k]&&![...el.options].some(x=>x.value===t[k]))el.add(new Option(t[k]+" (목록에 없음)",t[k]));el.value=t[k]??""});
         if(t.via1||t.via2||t.via3||t.via4)box.querySelector("details").open=true;upd();toast(`${t.trip_date} 입력을 불러왔습니다`)}catch(e){toast(e.message)}};
     form.onsubmit=async e=>{e.preventDefault();read();if(admin&&!f.driver_id)return toast("기사님을 선택해 주세요");if(!f.trip_date)return toast("운행일을 넣어 주세요");
-      const rec={trip_date:f.trip_date,cnt:num(f.cnt),per_run:num(f.per_run),fuel:num(f.fuel),night:num(f.night)};
+      const rec={trip_date:f.trip_date,cnt:num(f.cnt)};
+      if(admin){rec.per_run=num(f.per_run);rec.fuel=num(f.fuel);rec.night=num(f.night)}
       ["from_name","dest","via1","via2","via3","via4","start_time","end_time","memo"].forEach(k=>rec[k]=String(f[k]||"").trim());rec.client="";
-      if(!rec.dest)return toast("납품거래처를 선택해 주세요");if(rec.from_name)LS.set("lg_last_origin",rec.from_name);
+      if(!rec.dest)return toast("납품거래처를 선택해 주세요");if(!rec.cnt)return toast("납품 횟수를 1회 이상 넣어 주세요");if(rec.from_name)LS.set("lg_last_origin",rec.from_name);
       if(admin)rec.driver_id=f.driver_id;if(ed)rec.id=o.editing;
       $("save").disabled=true;
-      try{await rpc("lg_trip_save",{p_token:o.token,p_trip:rec});toast(ed?"수정했습니다":`저장했습니다 · 정산액 ${won(calc(rec).total)}원`);o.onSaved&&o.onSaved(rec,ed)}
+      try{await rpc("lg_trip_save",{p_token:o.token,p_trip:rec});
+        toast(ed?"수정했습니다":admin?`저장했습니다 · 정산액 ${won(calc(rec).total)}원`:`저장했습니다 · ${rec.dest} ${rec.cnt}회`);o.onSaved&&o.onSaved(rec,ed)}
       catch(err){$("save").disabled=false;toast(err.message)}};
     if($("cancel"))$("cancel").onclick=()=>o.onCancel&&o.onCancel();
     if($("del"))$("del").onclick=()=>{read();confirmDel=true;draw()};

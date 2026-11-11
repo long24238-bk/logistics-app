@@ -2,20 +2,20 @@
 const AdminApp=(()=>{
 
 /* 관리자 화면: 대시보드 / 기사님 등록 / 운행 내역(대리 입력) / 설정 */
-const TABS=[["dash","대시보드","dash"],["reg","기사님 등록","userplus"],["list","운행 내역","list"],["me","설정","me"]];
-const S={drvDel:null,user:null,token:null,tab:"dash",month:ym(new Date()),trips:[],drivers:[],places:[],summary:[],loading:false,err:"",
+const TABS=[["dash","대시보드","dash"],["list","운행 내역","list"],["rate","단가","won"],["reg","기사님","userplus"],["me","설정","me"]];
+const S={rates:{},rateDraft:null,drvDel:null,user:null,token:null,tab:"dash",month:ym(new Date()),trips:[],drivers:[],places:[],summary:[],loading:false,err:"",
   filter:"",panel:null,form:null,drvEdit:null,showOff:false,q:""};
 const drv=id=>S.drivers.find(d=>d.id===id);
 const sortedDrivers=all=>[...S.drivers].filter(d=>all||d.active).sort((a,b)=>(a.manager||"").localeCompare(b.manager||"","ko")||(a.sort??0)-(b.sort??0)||a.name.localeCompare(b.name,"ko"));
 const managers=()=>[...new Set(sortedDrivers(true).map(d=>d.manager||"미지정"))];
 
 async function load(){S.loading=true;render();
-  try{const [t,d,p,s]=await Promise.all([rpc("lg_trips",{p_token:S.token,p_month:S.month}),rpc("lg_drivers_list",{p_token:S.token}),rpc("lg_places",{p_token:S.token}),
-      rpc("lg_summary",{p_token:S.token,p_from:addMonth(S.month,-5),p_to:S.month})]);
-    S.trips=t||[];S.drivers=d||[];S.places=p||[];S.summary=s||[]}catch(e){if(e.code!=="SESSION_EXPIRED")toast(e.message)}
+  try{const [t,d,p,s,r]=await Promise.all([rpc("lg_trips",{p_token:S.token,p_month:S.month}),rpc("lg_drivers_list",{p_token:S.token}),rpc("lg_places",{p_token:S.token}),
+      rpc("lg_summary",{p_token:S.token,p_from:addMonth(S.month,-5),p_to:S.month}),rpc("lg_rates_list",{p_token:S.token})]);
+    S.trips=t||[];S.drivers=d||[];S.places=p||[];S.summary=s||[];S.rates=Object.fromEntries((r||[]).map(x=>[x.dest,x]))}catch(e){if(e.code!=="SESSION_EXPIRED")toast(e.message)}
   S.loading=false;render()}
 async function reloadDrivers(){S.drivers=await rpc("lg_drivers_list",{p_token:S.token})}
-function go(tab){S.drvDel=null;S.tab=tab;S.panel=null;S.form=null;render();scrollTo(0,0)}
+function go(tab){S.drvDel=null;S.rateDraft=null;S.tab=tab;S.panel=null;S.form=null;scrollTo(0,0);if(tab==="dash"||tab==="list")load();else render()}
 
 /* ---------- 틀 ---------- */
 function render(){
@@ -36,7 +36,7 @@ function render(){
   app.querySelector("#logout").onclick=App.logout;
   app.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>go(b.dataset.tab));
   const v=app.querySelector("#view");
-  ({dash:renderDash,reg:renderReg,list:renderList,me:renderMe})[S.tab](v);
+  ({dash:renderDash,reg:renderReg,list:renderList,rate:renderRate,me:renderMe})[S.tab](v);
 }
 function monthBar(extra=""){return `<div class="row" style="justify-content:space-between"><div class="monthbar" style="flex:0 0 auto"><button id="mP" aria-label="이전 달">‹</button><span>${S.month.slice(0,4)}년 ${Number(S.month.slice(5))}월</span><button id="mN" aria-label="다음 달">›</button></div>${extra}</div>`}
 function bindMonth(v){v.querySelector("#mP").onclick=()=>{S.month=addMonth(S.month,-1);load()};v.querySelector("#mN").onclick=()=>{S.month=addMonth(S.month,1);load()}}
@@ -66,6 +66,7 @@ function renderDash(v){
     <div class="kpi"><div class="l">입력한 기사님</div><div class="v">${enteredN} / ${activeN}명</div><div class="s">${missing.length?`미입력 ${missing.length}명`:"전원 입력"}</div></div>
     <div class="kpi"><div class="l">1회 평균 정산액</div><div class="v">${cnt?won(tot/cnt):0}원</div><div class="s">정산액 ÷ 운행 횟수</div></div>
   </div>
+  ${noRateBanner()}
   <div class="dash-grid">
     <section class="card stack" style="gap:10px"><div class="row"><h2 style="flex:1">기사님별 정산</h2><div class="legend" style="flex:0 0 auto"><span><i style="background:var(--bar)"></i>운행비</span><span><i style="background:var(--bar-2)"></i>유류비</span><span><i style="background:var(--amber)"></i>야간</span></div></div>
       ${list.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>기사님</th><th>담당</th><th class="n">건수</th><th class="n">횟수</th><th class="n">운행비</th><th class="n">유류비</th><th class="n">야간</th><th class="n">정산액</th><th></th></tr></thead>
@@ -79,7 +80,7 @@ function renderDash(v){
     </div>
   </div>
   <section class="card stack" style="gap:8px"><h2>일자별 정산액</h2><div class="chart">${dayChart(trips)}</div></section>`;
-  bindMonth(v);v.querySelector("#exp").onclick=()=>exportXlsx(S.month,S.trips,sortedDrivers(true));
+  bindMonth(v);bindNoRate(v);v.querySelector("#exp").onclick=()=>exportXlsx(S.month,S.trips,sortedDrivers(true));
   v.querySelectorAll("tr[data-drv]").forEach(r=>r.onclick=()=>{S.filter=r.dataset.drv;go("list")});
   const tr=v.querySelector("#toReg");if(tr)tr.onclick=()=>go("reg");
 }
@@ -167,7 +168,7 @@ function renderReg(v){
 function renderList(v){
   if(S.panel){
     v.innerHTML=`<div class="row"><h3 style="flex:1">${S.panel==="new"?"기사님 대신 입력":"운행 내역 수정"}</h3></div><div id="fb" style="max-width:640px"></div>`;
-    tripForm(v.querySelector("#fb"),{form:S.form,editing:S.panel==="new"?null:S.panel,places:S.places,drivers:sortedDrivers(true),token:S.token,
+    tripForm(v.querySelector("#fb"),{form:S.form,editing:S.panel==="new"?null:S.panel,places:S.places,drivers:sortedDrivers(true),rates:S.rates,token:S.token,
       onSaved:rec=>{LS.set("lg_admin_drv",rec.driver_id);S.panel=null;S.form=null;S.month=rec.trip_date.slice(0,7);load()},
       onDeleted:()=>{S.panel=null;S.form=null;load()},onCancel:()=>{S.panel=null;S.form=null;render()}});
     return}
@@ -179,14 +180,53 @@ function renderList(v){
   v.innerHTML=`${monthBar(add)}
   <div class="row"><label style="max-width:340px">기사님<select id="flt"><option value="">전체 기사님</option>${sortedDrivers(true).map(d=>`<option value="${esc(d.id)}" ${S.filter===d.id?"selected":""}>${esc(d.name)} (${esc(d.manager||"미지정")})${d.active?"":" - 중지"}</option>`).join("")}</select></label>
     <div class="muted" style="flex:0 0 auto;align-self:end;padding-bottom:10px">${trips.length}건 · ${cnt}회 · 합계 <b style="color:var(--fg);font-family:var(--mono)">${won(sum)}원</b></div></div>
+  ${noRateBanner()}
   <section class="card">${trips.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>운행일</th><th>기사님</th><th>출발지 → 경유 → 납품거래처</th><th class="n">횟수</th><th class="n">회당</th><th class="n">유류(회당)</th><th class="n">야간</th><th class="n">정산액</th><th>비고</th></tr></thead><tbody>
-    ${trips.map(t=>{const c=calc(t);return `<tr class="click" data-id="${esc(t.id)}"><td style="white-space:nowrap">${esc(t.trip_date.slice(5).replace("-","/"))} (${dayName(t.trip_date)})</td><td style="white-space:nowrap">${esc(drv(t.driver_id)?.name||"?")}${t.entered_by==="admin"?'<span class="chip">대리</span>':""}</td>
+    ${trips.map(t=>{const c=calc(t);return `<tr class="click" data-id="${esc(t.id)}"><td style="white-space:nowrap">${esc(t.trip_date.slice(5).replace("-","/"))} (${dayName(t.trip_date)})</td><td style="white-space:nowrap">${esc(drv(t.driver_id)?.name||"?")}${t.entered_by==="admin"?'<span class="chip">대리</span>':""}${!num(t.per_run)&&!num(t.fuel)?'<span class="chip warn">단가 없음</span>':""}</td>
       <td class="wrap" style="min-width:180px">${esc(route(t))}</td><td class="n">${num(t.cnt)}</td><td class="n">${won(t.per_run)}</td><td class="n">${won(t.fuel)}</td><td class="n">${won(t.night)}</td><td class="n"><b>${won(c.total)}</b></td><td class="wrap">${esc(t.memo)}${t.start_time||t.end_time?`<br><span class="muted">${esc(t.start_time||"?")}~${esc(t.end_time||"?")}</span>`:""}</td></tr>`}).join("")}
     </tbody></table></div><p class="muted" style="margin:8px 0 0">줄을 누르면 고치거나 지울 수 있습니다.</p>`:'<div class="empty"><b>이 달 내역이 없습니다</b>기사님이 폰으로 입력하면 여기에 쌓입니다.</div>'}</section>`;
-  bindMonth(v);
+  bindMonth(v);bindNoRate(v);
   v.querySelector("#flt").onchange=e=>{S.filter=e.target.value;render()};
   v.querySelector("#newTrip").onclick=()=>{const last=S.filter||LS.get("lg_admin_drv");S.form=blankTrip(S.month,drv(last)?.active?last:"");S.panel="new";render();scrollTo(0,0)};
   v.querySelectorAll("tr[data-id]").forEach(r=>r.onclick=()=>{S.form={...S.trips.find(t=>t.id===r.dataset.id)};S.panel=r.dataset.id;render();scrollTo(0,0)});
+}
+
+/* ---------- 단가 미입력 알림 / 일괄 적용 ---------- */
+function noRateBanner(){
+  const miss=S.trips.filter(t=>!num(t.per_run)&&!num(t.fuel));if(!miss.length)return "";
+  const can=miss.filter(t=>S.rates[t.dest]).length;
+  return `<div class="banner row" style="justify-content:space-between"><span style="flex:1 1 240px">금액이 비어 있는 운행 <b>${miss.length}건</b>이 있습니다.${can?` 그중 ${can}건은 단가표로 채울 수 있습니다.`:" 단가 메뉴에서 납품거래처 단가를 먼저 넣어 주세요."}</span>
+    ${can?'<button class="btn primary small" id="applyRates" style="flex:0 0 auto">단가 일괄 적용</button>':'<button class="btn small" id="goRate" style="flex:0 0 auto">단가 넣으러 가기</button>'}</div>`;
+}
+function bindNoRate(v){
+  const a=v.querySelector("#applyRates");if(a)a.onclick=async()=>{a.disabled=true;try{const n=await rpc("lg_rates_apply",{p_token:S.token,p_month:S.month,p_overwrite:false});toast(`${n}건에 단가를 넣었습니다`);load()}catch(e){a.disabled=false;toast(e.message)}};
+  const g=v.querySelector("#goRate");if(g)g.onclick=()=>go("rate");
+}
+
+/* ---------- 납품거래처 단가 ---------- */
+function renderRate(v){
+  const list=[...DESTS,...Object.keys(S.rates).filter(d=>!DESTS.includes(d))];
+  const dr=S.rateDraft||(S.rateDraft=Object.fromEntries(list.map(d=>[d,{per_run:S.rates[d]?.per_run??"",fuel:S.rates[d]?.fuel??""}])));
+  const cnt=d=>S.trips.filter(t=>t.dest===d).reduce((a,t)=>a+num(t.cnt),0);
+  v.innerHTML=`<div class="row"><h3 style="flex:1">납품거래처 단가</h3></div>
+  <p class="muted" style="margin:0">기사님이 운행을 입력하면 여기 단가(1회 기준)가 자동으로 붙습니다. 기사님 화면에는 금액이 보이지 않습니다. 야간수당이나 예외 금액은 '운행 내역'에서 건별로 고치면 됩니다.</p>
+  <form id="rf" class="card stack" style="gap:10px">
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>납품거래처</th><th class="n">회당운행비</th><th class="n">유류비지원금(회당)</th><th class="n">이달 납품</th></tr></thead><tbody>
+    ${list.map((d,i)=>`<tr><td class="wrap" style="min-width:140px">${esc(d)}${DESTS.includes(d)?"":' <span class="chip off">목록에 없음</span>'}</td>
+      <td><input type="number" inputmode="numeric" min="0" step="100" data-i="${i}" data-k="per_run" value="${esc(dr[d].per_run)}" placeholder="0" style="min-width:110px;text-align:right"></td>
+      <td><input type="number" inputmode="numeric" min="0" step="100" data-i="${i}" data-k="fuel" value="${esc(dr[d].fuel)}" placeholder="0" style="min-width:110px;text-align:right"></td>
+      <td class="n">${cnt(d)}회</td></tr>`).join("")}</tbody></table></div>
+    <label class="check"><input type="checkbox" id="rApply" checked> 저장하면서 ${Number(S.month.slice(5))}월 운행 중 금액이 비어 있는 내역에 바로 적용</label>
+    <label class="check"><input type="checkbox" id="rOver"> ${Number(S.month.slice(5))}월 내역은 이미 들어간 금액도 새 단가로 바꾸기 (야간수당은 그대로)</label>
+    <div class="row"><button class="btn primary big" type="submit">단가 저장</button><button class="btn big" type="button" id="rReset">되돌리기</button></div>
+  </form>`;
+  v.querySelectorAll("input[data-i]").forEach(inp=>inp.oninput=()=>{dr[list[inp.dataset.i]][inp.dataset.k]=inp.value});
+  v.querySelector("#rReset").onclick=()=>{S.rateDraft=null;render()};
+  v.querySelector("#rf").onsubmit=async e=>{e.preventDefault();const btn=e.submitter||v.querySelector("#rf button[type=submit]");btn.disabled=true;
+    try{await rpc("lg_rates_save",{p_token:S.token,p_rates:list.map(d=>({dest:d,per_run:num(dr[d].per_run),fuel:num(dr[d].fuel)}))});
+      let msg="단가를 저장했습니다";const over=v.querySelector("#rOver").checked;
+      if(v.querySelector("#rApply").checked||over){const n=await rpc("lg_rates_apply",{p_token:S.token,p_month:S.month,p_overwrite:over});msg+=` · ${Number(S.month.slice(5))}월 ${n}건 적용`}
+      toast(msg);S.rateDraft=null;await load()}catch(err){btn.disabled=false;toast(err.message)}};
 }
 
 /* ---------- 설정 ---------- */
