@@ -79,7 +79,7 @@ function renderDash(v){
       <section class="card stack" style="gap:8px"><h2>최근 6개월 정산액</h2><div class="chart">${trendChart()}</div></section>
     </div>
   </div>
-  <section class="card stack" style="gap:8px"><h2>일자별 정산액</h2><div class="chart">${dayChart(trips)}</div></section>`;
+  <section class="card stack" style="gap:8px"><h2>일자별 정산액 · 누적</h2><div class="chart">${dayChart(trips)}</div></section>`;
   bindMonth(v);bindNoRate(v);v.querySelector("#exp").onclick=()=>exportXlsx(S.month,S.trips,sortedDrivers(true));
   v.querySelectorAll("tr[data-drv]").forEach(r=>r.onclick=()=>{S.filter=r.dataset.drv;go("list")});
   const tr=v.querySelector("#toReg");if(tr)tr.onclick=()=>go("reg");
@@ -87,13 +87,33 @@ function renderDash(v){
 function axis(top,sy,L,W,R){let g="";for(let i=0;i<=4;i++){const val=top*i/4,yy=sy(val);g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${L-6}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${man(val)}</text>`}return g}
 const nice=x=>{if(x<=0)return 100000;const p=Math.pow(10,Math.floor(Math.log10(x)));return [1,2,2.5,5,10].map(k=>k*p).find(k=>k>=x)};
 function dayChart(trips){
+  // 막대 = 일 정산액(왼쪽 축), 선 = 누적 정산액(오른쪽 축). 막대 위에 일 금액, 선 끝에 누적 합계 표시
   const [y,m]=S.month.split("-").map(Number),days=new Date(y,m,0).getDate(),vals=Array(days).fill(0);
   trips.forEach(t=>{const d=Number(String(t.trip_date).slice(8,10));if(d>=1&&d<=days)vals[d-1]+=calc(t).total});
-  const max=Math.max(...vals),W=900,H=200,L=52,R=8,T=12,B=26,pw=(W-L-R)/days,top=nice(max),sy=val=>T+(H-T-B)*(1-val/top);let g=axis(top,sy,L,W,R);
+  let run=0;const cum=vals.map(v=>run+=v);const max=Math.max(...vals),cmax=cum[days-1];
+  const lastIdx=(()=>{const td=today();if(td.slice(0,7)===S.month)return Number(td.slice(8,10))-1;let k=-1;vals.forEach((v,i)=>{if(v>0)k=i});return S.month<td.slice(0,7)?days-1:k})();
+  const W=980,H=280,L=56,R=64,T=30,B=30,pw=(W-L-R)/days,top=nice(max),ctop=nice(cmax),
+    sy=v=>T+(H-T-B)*(1-v/top),cy=v=>T+(H-T-B)*(1-v/ctop),cx=i=>L+i*pw+pw/2;
+  let g="",lbl="";
+  for(let k=0;k<=4;k++){const yy=sy(top*k/4);g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/>
+    <text x="${L-6}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${man(top*k/4)}</text>
+    <text x="${W-R+6}" y="${yy+4}" text-anchor="start" font-size="10" fill="var(--amber)">${man(ctop*k/4)}</text>`}
   vals.forEach((val,i)=>{const dt=`${S.month}-${String(i+1).padStart(2,"0")}`,we=/[일토]/.test(dayName(dt));
-    if(val>0)g+=`<rect x="${(L+i*pw+pw*.15).toFixed(1)}" y="${sy(val).toFixed(1)}" width="${(pw*.7).toFixed(1)}" height="${(H-B-sy(val)).toFixed(1)}" rx="2" fill="var(--bar)"><title>${i+1}일 ${won(val)}원</title></rect>`;
-    g+=`<text x="${(L+i*pw+pw/2).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="10" fill="${we?"var(--bad)":"var(--muted)"}">${i+1}</text>`});
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="일자별 정산액">${g}</svg>`+(max===0?'<p class="muted" style="margin:4px 0 0">이 달에 입력된 운행이 아직 없습니다.</p>':"");
+    if(val>0){g+=`<rect x="${(L+i*pw+pw*.15).toFixed(1)}" y="${sy(val).toFixed(1)}" width="${(pw*.7).toFixed(1)}" height="${(H-B-sy(val)).toFixed(1)}" rx="2" fill="var(--bar)"><title>${i+1}일 ${won(val)}원 · 누적 ${won(cum[i])}원</title></rect>`;
+      lbl+=`<text x="${cx(i).toFixed(1)}" y="${(sy(val)-5).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--fg)" stroke="#2f3337" stroke-width="3" paint-order="stroke">${man(val)}</text>`}
+    g+=`<text x="${cx(i).toFixed(1)}" y="${H-10}" text-anchor="middle" font-size="10" fill="${we?"var(--bad)":"var(--muted)"}">${i+1}</text>`});
+  if(cmax>0&&lastIdx>=0){const pts=cum.slice(0,lastIdx+1).map((c,i)=>`${cx(i).toFixed(1)},${cy(c).toFixed(1)}`).join(" ");
+    g+=`<polyline points="${pts}" fill="none" stroke="var(--amber)" stroke-width="2.2" stroke-linejoin="round"/>`;
+    cum.slice(0,lastIdx+1).forEach((c,i)=>{if(vals[i]>0||i===lastIdx)g+=`<circle cx="${cx(i).toFixed(1)}" cy="${cy(c).toFixed(1)}" r="${i===lastIdx?4:2.5}" fill="var(--amber)"><title>${i+1}일까지 누적 ${won(c)}원</title></circle>`});
+    const lx=cx(lastIdx),ly=cy(cum[lastIdx]);const anchor=lx>W-R-90?"end":"start";
+    lbl+=`<text x="${(lx+(anchor==="end"?-8:8)).toFixed(1)}" y="${(ly-10).toFixed(1)}" text-anchor="${anchor}" font-size="12.5" font-weight="700" fill="var(--amber)" stroke="#2f3337" stroke-width="4" paint-order="stroke">누적 ${won(cum[lastIdx])}원</text>`}
+  g+=lbl;
+  const legend=`<div class="legend" style="margin-bottom:6px"><span><i style="background:var(--bar)"></i>일 정산액 (왼쪽 축)</span><span><i style="background:var(--amber);height:3px;vertical-align:3px"></i>누적 정산액 (오른쪽 축)</span><span class="phone-only">← 옆으로 밀어서 보기</span></div>`;
+  const rows=vals.map((v,i)=>({d:`${S.month}-${String(i+1).padStart(2,"0")}`,v,c:cum[i]})).filter(r=>r.v>0);
+  const table=rows.length?`<details style="margin-top:8px"><summary>날짜별 금액·누적 표 보기</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>날짜</th><th class="n">일 정산액</th><th class="n">누적 정산액</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${r.d.slice(5).replace("-","/")} (${dayName(r.d)})</td><td class="n">${won(r.v)}원</td><td class="n">${won(r.c)}원</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td>합계</td><td class="n">${won(cmax)}원</td><td class="n">${won(cmax)}원</td></tr></tfoot></table></div></details>`:"";
+  return legend+`<svg viewBox="0 0 ${W} ${H}" style="min-width:760px" role="img" aria-label="일자별 정산액과 누적 정산액">${g}</svg>`+(max===0?'<p class="muted" style="margin:4px 0 0">이 달에 입력된 운행이 아직 없습니다.</p>':"")+table;
 }
 function trendChart(){
   const months=[...Array(6)].map((_,i)=>addMonth(S.month,i-5));const vals=months.map(mo=>S.summary.filter(s=>s.month===mo).reduce((a,s)=>a+num(s.total),0));
