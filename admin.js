@@ -149,6 +149,7 @@ function renderReg(v){
       <div class="grid2"><label>연락처<input id="dph" type="tel" value="${esc(e?.phone||"")}" placeholder="010-0000-0000"></label><label>차량번호<input id="dc" value="${esc(e?.car_no||"")}" placeholder="예) 12가3456"></label></div>
       <label>메모<input id="dno" value="${esc(e?.note||"")}" placeholder="예) 1톤 탑차, 야간 전담"></label>
       <div class="grid2"><label>회당운행비 (단가)<input id="drp" type="number" inputmode="numeric" min="0" step="100" value="${esc(e?num(e.rate_per_run)||"":"")}" placeholder="0"></label><label>유류비지원금 (회당)<input id="drf" type="number" inputmode="numeric" min="0" step="100" value="${esc(e?num(e.rate_fuel)||"":"")}" placeholder="0"></label></div>
+      <div class="grid2"><label>2단가 하루 기준 (회까지 1번 단가)<input id="drl" type="number" inputmode="numeric" min="0" step="1" value="${esc(e?num(e.rate_limit)||"":"")}" placeholder="안 씀"></label><label>2번 단가 (기준 초과분)<input id="dr2" type="number" inputmode="numeric" min="0" step="100" value="${esc(e?num(e.rate_per_run2)||"":"")}" placeholder="안 씀"></label></div>
       ${e?`<label class="check"><input type="checkbox" id="da" ${e.active?"checked":""}> 사용 중 (끄면 로그인할 수 없고, 지난 내역은 그대로 남습니다)</label>`:""}
       <p class="err" id="derr"></p>
       <div class="row"><button class="btn primary big" type="submit">${e?"저장":"등록"}</button>${e?'<button class="btn big" type="button" id="dcancel">취소</button>':""}</div>
@@ -159,7 +160,7 @@ function renderReg(v){
       ${delBox()}
       <div class="row"><input id="dq" type="search" placeholder="이름·연락처·차량번호 검색" value="${esc(S.q)}" style="flex:2"><label class="check" style="flex:0 0 auto"><input type="checkbox" id="doff" ${S.showOff?"checked":""}> 중지된 기사님도 보기</label></div>
       ${list.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>아이디</th><th>담당</th><th>연락처</th><th>차량번호</th><th class="n">단가(운행/유류)</th><th>상태</th><th>마지막 입력</th><th></th></tr></thead><tbody>
-      ${list.map(d=>`<tr><td class="wrap" style="min-width:90px"><b>${esc(d.name)}</b>${d.note?`<br><span class="muted">${esc(d.note)}</span>`:""}</td><td>${esc(d.login_id)}</td><td>${esc(d.manager||"-")}</td><td style="white-space:nowrap">${esc(d.phone||"-")}</td><td style="white-space:nowrap">${esc(d.car_no||"-")}</td><td class="n">${num(d.rate_per_run)||num(d.rate_fuel)?`${won(d.rate_per_run)} / ${won(d.rate_fuel)}`:'<span class="chip warn" style="margin:0">미정</span>'}</td>
+      ${list.map(d=>`<tr><td class="wrap" style="min-width:90px"><b>${esc(d.name)}</b>${d.note?`<br><span class="muted">${esc(d.note)}</span>`:""}</td><td>${esc(d.login_id)}</td><td>${esc(d.manager||"-")}</td><td style="white-space:nowrap">${esc(d.phone||"-")}</td><td style="white-space:nowrap">${esc(d.car_no||"-")}</td><td class="n">${num(d.rate_per_run)||num(d.rate_fuel)?`${won(d.rate_per_run)} / ${won(d.rate_fuel)}${num(d.rate_limit)>0?`<br><span class="muted">${num(d.rate_limit)}회 초과 ${won(d.rate_per_run2)}</span>`:""}`:'<span class="chip warn" style="margin:0">미정</span>'}</td>
         <td>${status(d)}</td><td class="n">${d.last_trip?esc(String(d.last_trip).slice(5).replace("-","/")):"-"}</td><td><div class="row" style="flex-wrap:nowrap;gap:6px"><button class="btn small" data-ed="${esc(d.id)}">수정</button><button class="btn small danger" data-del="${esc(d.id)}">삭제</button></div></td></tr>`).join("")}</tbody></table></div>`
       :`<div class="empty"><b>${q?"검색 결과가 없습니다":"등록된 기사님이 없습니다"}</b>${q?"":"왼쪽(폰은 위쪽)에서 이름과 처음 PIN을 넣어 등록해 주세요."}</div>`}
     </section>
@@ -178,7 +179,7 @@ function renderReg(v){
   v.querySelector("#doff").onchange=ev=>{S.showOff=ev.target.checked;render()};
   if(v.querySelector("#dcancel"))v.querySelector("#dcancel").onclick=()=>{S.drvEdit=null;render()};
   v.querySelector("#df").onsubmit=async ev=>{ev.preventDefault();const $=id=>v.querySelector("#"+id).value.trim();const name=$("dn");
-    const p={name,manager:$("dm"),login_id:$("dl")||name,pin:$("dp"),phone:$("dph"),car_no:$("dc"),note:$("dno"),rate_per_run:num($("drp")),rate_fuel:num($("drf"))};
+    const p={name,manager:$("dm"),login_id:$("dl")||name,pin:$("dp"),phone:$("dph"),car_no:$("dc"),note:$("dno"),rate_per_run:num($("drp")),rate_fuel:num($("drf")),rate_limit:num($("drl"))&&num($("dr2"))?num($("drl")):0,rate_per_run2:num($("drl"))&&num($("dr2"))?num($("dr2")):0};
     if(e){p.id=e.id;p.active=v.querySelector("#da").checked}
     try{await rpc("lg_driver_save",{p_token:S.token,p_driver:p});await reloadDrivers();S.drvEdit=null;
       toast(e?`${name} 기사님 정보를 저장했습니다`:`${name} 기사님을 등록했습니다 · 아이디 ${p.login_id} / PIN ${p.pin}`);render()}
@@ -204,7 +205,7 @@ function renderList(v){
   ${noRateBanner()}
   <section class="card">${trips.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>운행일</th><th>기사님</th><th>출발지 → 경유 → 납품거래처</th><th class="n">횟수</th><th class="n">회당</th><th class="n">유류(회당)</th><th class="n">야간</th><th class="n">정산액</th><th>비고</th></tr></thead><tbody>
     ${trips.map(t=>{const c=calc(t);return `<tr class="click" data-id="${esc(t.id)}"><td style="white-space:nowrap">${esc(t.trip_date.slice(5).replace("-","/"))} (${dayName(t.trip_date)})</td><td style="white-space:nowrap">${esc(drv(t.driver_id)?.name||"?")}${t.entered_by==="admin"?'<span class="chip">대리</span>':""}${!num(t.per_run)&&!num(t.fuel)?'<span class="chip warn">단가 없음</span>':""}</td>
-      <td class="wrap" style="min-width:180px">${esc(route(t))}</td><td class="n">${num(t.cnt)}</td><td class="n">${won(t.per_run)}</td><td class="n">${won(t.fuel)}</td><td class="n">${won(t.night)}</td><td class="n"><b>${won(c.total)}</b></td><td class="wrap">${esc(t.memo)}${t.start_time||t.end_time?`<br><span class="muted">${esc(t.start_time||"?")}~${esc(t.end_time||"?")}</span>`:""}</td></tr>`}).join("")}
+      <td class="wrap" style="min-width:180px">${esc(route(t))}</td><td class="n">${num(t.cnt)}</td><td class="n">${won(t.per_run)}${c.hi?`<br><span class="muted" style="font-size:12px">${c.hi}회는 ${won(t.per_run2)}</span>`:""}</td><td class="n">${won(t.fuel)}</td><td class="n">${won(t.night)}</td><td class="n"><b>${won(c.total)}</b></td><td class="wrap">${esc(t.memo)}${t.start_time||t.end_time?`<br><span class="muted">${esc(t.start_time||"?")}~${esc(t.end_time||"?")}</span>`:""}</td></tr>`}).join("")}
     </tbody></table></div><p class="muted" style="margin:8px 0 0">줄을 누르면 고치거나 지울 수 있습니다.</p>`:'<div class="empty"><b>이 달 내역이 없습니다</b>기사님이 폰으로 입력하면 여기에 쌓입니다.</div>'}</section>`;
   bindMonth(v);bindNoRate(v);
   v.querySelector("#flt").onchange=e=>{S.filter=e.target.value;render()};
@@ -228,24 +229,28 @@ function bindNoRate(v){
 function renderRate(v){
   const per={};S.trips.forEach(t=>{const p=per[t.driver_id]||(per[t.driver_id]={cnt:0,miss:0});p.cnt+=num(t.cnt);if(!num(t.per_run)&&!num(t.fuel))p.miss++});
   const list=sortedDrivers(true).filter(d=>d.active||per[d.id]);
-  const dr=S.rateDraft||(S.rateDraft=Object.fromEntries(list.map(d=>[d.id,{per_run:num(S.rates[d.id]?.per_run)||"",fuel:num(S.rates[d.id]?.fuel)||""}])));
+  const dr=S.rateDraft||(S.rateDraft=Object.fromEntries(list.map(d=>{const r=S.rates[d.id]||{};return [d.id,{per_run:num(r.per_run)||"",fuel:num(r.fuel)||"",two:num(r.limit)>0,limit:num(r.limit)||3,per_run2:num(r.per_run2)||""}]})));
   const mo=Number(S.month.slice(5));
   v.innerHTML=`<div class="row"><h3 style="flex:1">기사님별 단가</h3></div>
-  <p class="muted" style="margin:0">기사님마다 1회 기준 회당운행비·유류비지원금을 정해 두면, 그 기사님이 입력한 운행에 자동으로 붙습니다. 기사님 화면에는 금액이 보이지 않습니다. 야간수당이나 예외 금액은 '운행 내역'에서 건별로 고치면 됩니다.</p>
+  <p class="muted" style="margin:0">기사님마다 1회 기준 회당운행비·유류비지원금을 정해 두면, 그 기사님이 입력한 운행에 자동으로 붙습니다. <b>2단가</b>를 켜면 하루 기준 회수까지는 1번 단가, 그 이후 횟수는 2번 단가로 계산됩니다(하루 합계 기준, 입력 순서대로). 기사님 화면에는 금액이 보이지 않습니다.</p>
   <form id="rf" class="card stack" style="gap:10px">
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>기사님</th><th>담당</th><th class="n">회당운행비</th><th class="n">유류비지원금(회당)</th><th class="n">${mo}월 납품</th></tr></thead><tbody>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>기사님</th><th>담당</th><th class="n">회당운행비 (1번 단가)</th><th class="n">유류비지원금(회당)</th><th>2단가</th><th class="n">하루 기준</th><th class="n">2번 단가 (초과분)</th><th class="n">${mo}월 납품</th></tr></thead><tbody>
     ${list.map(d=>`<tr><td class="wrap" style="min-width:80px"><b>${esc(d.name)}</b>${d.active?"":'<span class="chip off">중지</span>'}${per[d.id]?.miss?`<span class="chip warn">금액 없음 ${per[d.id].miss}건</span>`:""}</td><td>${esc(d.manager||"-")}</td>
       <td><input type="number" inputmode="numeric" min="0" step="100" data-d="${esc(d.id)}" data-k="per_run" value="${esc(dr[d.id]?.per_run??"")}" placeholder="0" style="min-width:110px;text-align:right"></td>
       <td><input type="number" inputmode="numeric" min="0" step="100" data-d="${esc(d.id)}" data-k="fuel" value="${esc(dr[d.id]?.fuel??"")}" placeholder="0" style="min-width:110px;text-align:right"></td>
-      <td class="n">${per[d.id]?.cnt||0}회</td></tr>`).join("")||'<tr><td colspan="5" class="muted">등록된 기사님이 없습니다.</td></tr>'}</tbody></table></div>
+      <td><label class="check" style="white-space:nowrap"><input type="checkbox" data-two="${esc(d.id)}" ${dr[d.id]?.two?"checked":""}> 사용</label></td>
+      <td class="n"><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap">${dr[d.id]?.two?"":'<span class="muted">-</span>'}<input type="number" inputmode="numeric" min="1" step="1" data-d="${esc(d.id)}" data-k="limit" value="${esc(dr[d.id]?.limit??3)}" style="width:64px;text-align:right" ${dr[d.id]?.two?"":"hidden"}>${dr[d.id]?.two?"회까지":""}</span></td>
+      <td><input type="number" inputmode="numeric" min="0" step="100" data-d="${esc(d.id)}" data-k="per_run2" value="${esc(dr[d.id]?.per_run2??"")}" placeholder="0" style="min-width:110px;text-align:right" ${dr[d.id]?.two?"":"hidden"}></td>
+      <td class="n">${per[d.id]?.cnt||0}회</td></tr>`).join("")||'<tr><td colspan="8" class="muted">등록된 기사님이 없습니다.</td></tr>'}</tbody></table></div>
     <label class="check"><input type="checkbox" id="rApply" checked> 저장하면서 ${mo}월 운행 중 금액이 비어 있는 내역에 바로 적용</label>
     <label class="check"><input type="checkbox" id="rOver"> ${mo}월 내역은 이미 들어간 금액도 새 단가로 바꾸기 (야간수당은 그대로)</label>
     <div class="row"><button class="btn primary big" type="submit">단가 저장</button><button class="btn big" type="button" id="rReset">되돌리기</button></div>
   </form>`;
   v.querySelectorAll("input[data-d]").forEach(inp=>inp.oninput=()=>{(dr[inp.dataset.d]=dr[inp.dataset.d]||{})[inp.dataset.k]=inp.value});
+  v.querySelectorAll("input[data-two]").forEach(cb=>cb.onchange=()=>{const x=dr[cb.dataset.two]=dr[cb.dataset.two]||{};x.two=cb.checked;if(cb.checked&&!num(x.limit))x.limit=3;render()});
   v.querySelector("#rReset").onclick=()=>{S.rateDraft=null;render()};
   v.querySelector("#rf").onsubmit=async e=>{e.preventDefault();const btn=v.querySelector("#rf button[type=submit]");btn.disabled=true;
-    try{await rpc("lg_rates_save",{p_token:S.token,p_rates:list.map(d=>({driver_id:d.id,per_run:num(dr[d.id]?.per_run),fuel:num(dr[d.id]?.fuel)}))});
+    try{await rpc("lg_rates_save",{p_token:S.token,p_rates:list.map(d=>{const x=dr[d.id]||{},two=!!x.two&&num(x.per_run2)>0&&num(x.limit)>0;return {driver_id:d.id,per_run:num(x.per_run),fuel:num(x.fuel),limit:two?num(x.limit):0,per_run2:two?num(x.per_run2):0}})});
       let msg="단가를 저장했습니다";const over=v.querySelector("#rOver").checked;
       if(v.querySelector("#rApply").checked||over){const n=await rpc("lg_rates_apply",{p_token:S.token,p_month:S.month,p_overwrite:over});msg+=` · ${mo}월 ${n}건 적용`}
       toast(msg);S.rateDraft=null;await load()}catch(err){btn.disabled=false;toast(err.message)}};
