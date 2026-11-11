@@ -1,5 +1,21 @@
 /* 기사님 화면: 입력 / 내 내역 / 내 정보 */
 const DriverApp=(()=>{
+/* 달력·납품 현황 디자인 (style.css가 예전 파일이어도 모양이 깨지지 않게 여기서 직접 넣음) */
+(()=>{if(document.getElementById("drv-style"))return;const st=document.createElement("style");st.id="drv-style";st.textContent=`/* 기사님 납품 현황 달력 */
+.cal-h,.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-h span{text-align:center;font-size:12px;color:var(--muted);padding-bottom:4px}
+.cal-h .sun,.cal-d.sun .dn{color:var(--bad)} .cal-h .sat,.cal-d.sat .dn{color:#7fb2ff}
+.cal-d{border:1px solid var(--line);background:var(--field);color:var(--fg);border-radius:8px;min-height:52px;padding:4px 2px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;cursor:pointer;font:inherit;min-width:0}
+.cal-d .dn{font-size:12px;color:var(--muted)}
+.cal-d b{font-size:13px;color:#fff;background:var(--accent);border-radius:999px;padding:0 6px;line-height:1.5;font-variant-numeric:tabular-nums}
+.cal-d.today{border-color:var(--accent)}
+.cal-d.sel{outline:2px solid #fff;outline-offset:-2px}
+.cal-d:not(.has) b{display:none}
+.destrow{display:grid;grid-template-columns:minmax(0,1.4fr) 1fr auto;gap:10px;align-items:center;font-size:14px}
+.destrow span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.destrow .bar{height:8px;background:var(--field);border-radius:4px;overflow:hidden}
+.destrow .bar i{display:block;height:100%;background:var(--accent)}
+.destrow b{font-variant-numeric:tabular-nums;min-width:3em;text-align:right}`;document.head.appendChild(st)})();
 
 /* 기사님 전용 화면: 로그인 → 입력 / 내 내역 / 내 정보 */
 const S={day:null,view:"cal",user:null,token:null,tab:"add",month:ym(new Date()),trips:[],places:[],loading:false,editing:null,form:null,err:""};
