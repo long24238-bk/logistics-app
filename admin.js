@@ -12,7 +12,7 @@ const managers=()=>[...new Set(sortedDrivers(true).map(d=>d.manager||"미지정"
 async function load(){S.loading=true;render();
   try{const [t,d,p,s,r]=await Promise.all([rpc("lg_trips",{p_token:S.token,p_month:S.month}),rpc("lg_drivers_list",{p_token:S.token}),rpc("lg_places",{p_token:S.token}),
       rpc("lg_summary",{p_token:S.token,p_from:addMonth(S.month,-5),p_to:S.month}),rpc("lg_rates_list",{p_token:S.token})]);
-    S.trips=t||[];S.drivers=d||[];S.places=p||[];S.summary=s||[];S.rates=Object.fromEntries((r||[]).map(x=>[x.dest,x]))}catch(e){if(e.code!=="SESSION_EXPIRED")toast(e.message)}
+    S.trips=t||[];S.drivers=d||[];S.places=p||[];S.summary=s||[];S.rates=Object.fromEntries((r||[]).map(x=>[x.driver_id,x]));S.rateDraft=null}catch(e){if(e.code!=="SESSION_EXPIRED")toast(e.message)}
   S.loading=false;render()}
 async function reloadDrivers(){S.drivers=await rpc("lg_drivers_list",{p_token:S.token})}
 function go(tab){S.drvDel=null;S.rateDraft=null;S.tab=tab;S.panel=null;S.form=null;scrollTo(0,0);if(tab==="dash"||tab==="list")load();else render()}
@@ -96,11 +96,11 @@ function dayChart(trips){
     sy=v=>T+(H-T-B)*(1-v/top),cy=v=>T+(H-T-B)*(1-v/ctop),cx=i=>L+i*pw+pw/2;
   let g="",lbl="";
   for(let k=0;k<=4;k++){const yy=sy(top*k/4);g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/>
-    <text x="${L-6}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${man(top*k/4)}</text>
-    <text x="${W-R+6}" y="${yy+4}" text-anchor="start" font-size="10" fill="var(--amber)">${man(ctop*k/4)}</text>`}
+    <text x="${L-6}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${Math.round(top*k/4/10000).toLocaleString("ko-KR")}</text>
+    <text x="${W-R+6}" y="${yy+4}" text-anchor="start" font-size="10" fill="var(--amber)">${Math.round(ctop*k/4/10000).toLocaleString("ko-KR")}</text>`}
   vals.forEach((val,i)=>{const dt=`${S.month}-${String(i+1).padStart(2,"0")}`,we=/[일토]/.test(dayName(dt));
     if(val>0){g+=`<rect x="${(L+i*pw+pw*.15).toFixed(1)}" y="${sy(val).toFixed(1)}" width="${(pw*.7).toFixed(1)}" height="${(H-B-sy(val)).toFixed(1)}" rx="2" fill="var(--bar)"><title>${i+1}일 ${won(val)}원 · 누적 ${won(cum[i])}원</title></rect>`;
-      lbl+=`<text x="${cx(i).toFixed(1)}" y="${(sy(val)-5).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--fg)" stroke="#2f3337" stroke-width="3" paint-order="stroke">${man(val)}</text>`}
+      lbl+=`<text x="${cx(i).toFixed(1)}" y="${(sy(val)-5).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--fg)" stroke="#2f3337" stroke-width="3" paint-order="stroke">${Math.round(val/10000).toLocaleString("ko-KR")}</text>`}
     g+=`<text x="${cx(i).toFixed(1)}" y="${H-10}" text-anchor="middle" font-size="10" fill="${we?"var(--bad)":"var(--muted)"}">${i+1}</text>`});
   if(cmax>0&&lastIdx>=0){const pts=cum.slice(0,lastIdx+1).map((c,i)=>`${cx(i).toFixed(1)},${cy(c).toFixed(1)}`).join(" ");
     g+=`<polyline points="${pts}" fill="none" stroke="var(--amber)" stroke-width="2.2" stroke-linejoin="round"/>`;
@@ -108,7 +108,7 @@ function dayChart(trips){
     const lx=cx(lastIdx),ly=cy(cum[lastIdx]);const anchor=lx>W-R-90?"end":"start";
     lbl+=`<text x="${(lx+(anchor==="end"?-8:8)).toFixed(1)}" y="${(ly-10).toFixed(1)}" text-anchor="${anchor}" font-size="12.5" font-weight="700" fill="var(--amber)" stroke="#2f3337" stroke-width="4" paint-order="stroke">누적 ${won(cum[lastIdx])}원</text>`}
   g+=lbl;
-  const legend=`<div class="legend" style="margin-bottom:6px"><span><i style="background:var(--bar)"></i>일 정산액 (왼쪽 축)</span><span><i style="background:var(--amber);height:3px;vertical-align:3px"></i>누적 정산액 (오른쪽 축)</span><span class="phone-only">← 옆으로 밀어서 보기</span></div>`;
+  const legend=`<div class="legend" style="margin-bottom:6px"><span style="color:var(--fg)">단위: 만원</span><span><i style="background:var(--bar)"></i>일 정산액 (왼쪽 축)</span><span><i style="background:var(--amber);height:3px;vertical-align:3px"></i>누적 정산액 (오른쪽 축)</span><span class="phone-only">← 옆으로 밀어서 보기</span></div>`;
   const rows=vals.map((v,i)=>({d:`${S.month}-${String(i+1).padStart(2,"0")}`,v,c:cum[i]})).filter(r=>r.v>0);
   const table=rows.length?`<details style="margin-top:8px"><summary>날짜별 금액·누적 표 보기</summary><div class="tbl-wrap"><table class="tbl"><thead><tr><th>날짜</th><th class="n">일 정산액</th><th class="n">누적 정산액</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td>${r.d.slice(5).replace("-","/")} (${dayName(r.d)})</td><td class="n">${won(r.v)}원</td><td class="n">${won(r.c)}원</td></tr>`).join("")}</tbody>
@@ -148,6 +148,7 @@ function renderReg(v){
         <label>${e?"PIN 초기화":"처음 PIN *"}<input id="dp" inputmode="numeric" maxlength="6" class="pin" ${e?"":"required"} placeholder="${e?"바꿀 때만":"0000"}"></label></div>
       <div class="grid2"><label>연락처<input id="dph" type="tel" value="${esc(e?.phone||"")}" placeholder="010-0000-0000"></label><label>차량번호<input id="dc" value="${esc(e?.car_no||"")}" placeholder="예) 12가3456"></label></div>
       <label>메모<input id="dno" value="${esc(e?.note||"")}" placeholder="예) 1톤 탑차, 야간 전담"></label>
+      <div class="grid2"><label>회당운행비 (단가)<input id="drp" type="number" inputmode="numeric" min="0" step="100" value="${esc(e?num(e.rate_per_run)||"":"")}" placeholder="0"></label><label>유류비지원금 (회당)<input id="drf" type="number" inputmode="numeric" min="0" step="100" value="${esc(e?num(e.rate_fuel)||"":"")}" placeholder="0"></label></div>
       ${e?`<label class="check"><input type="checkbox" id="da" ${e.active?"checked":""}> 사용 중 (끄면 로그인할 수 없고, 지난 내역은 그대로 남습니다)</label>`:""}
       <p class="err" id="derr"></p>
       <div class="row"><button class="btn primary big" type="submit">${e?"저장":"등록"}</button>${e?'<button class="btn big" type="button" id="dcancel">취소</button>':""}</div>
@@ -157,8 +158,8 @@ function renderReg(v){
     <section class="card stack" style="gap:10px">
       ${delBox()}
       <div class="row"><input id="dq" type="search" placeholder="이름·연락처·차량번호 검색" value="${esc(S.q)}" style="flex:2"><label class="check" style="flex:0 0 auto"><input type="checkbox" id="doff" ${S.showOff?"checked":""}> 중지된 기사님도 보기</label></div>
-      ${list.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>아이디</th><th>담당</th><th>연락처</th><th>차량번호</th><th>상태</th><th>마지막 입력</th><th></th></tr></thead><tbody>
-      ${list.map(d=>`<tr><td class="wrap" style="min-width:90px"><b>${esc(d.name)}</b>${d.note?`<br><span class="muted">${esc(d.note)}</span>`:""}</td><td>${esc(d.login_id)}</td><td>${esc(d.manager||"-")}</td><td style="white-space:nowrap">${esc(d.phone||"-")}</td><td style="white-space:nowrap">${esc(d.car_no||"-")}</td>
+      ${list.length?`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>아이디</th><th>담당</th><th>연락처</th><th>차량번호</th><th class="n">단가(운행/유류)</th><th>상태</th><th>마지막 입력</th><th></th></tr></thead><tbody>
+      ${list.map(d=>`<tr><td class="wrap" style="min-width:90px"><b>${esc(d.name)}</b>${d.note?`<br><span class="muted">${esc(d.note)}</span>`:""}</td><td>${esc(d.login_id)}</td><td>${esc(d.manager||"-")}</td><td style="white-space:nowrap">${esc(d.phone||"-")}</td><td style="white-space:nowrap">${esc(d.car_no||"-")}</td><td class="n">${num(d.rate_per_run)||num(d.rate_fuel)?`${won(d.rate_per_run)} / ${won(d.rate_fuel)}`:'<span class="chip warn" style="margin:0">미정</span>'}</td>
         <td>${status(d)}</td><td class="n">${d.last_trip?esc(String(d.last_trip).slice(5).replace("-","/")):"-"}</td><td><div class="row" style="flex-wrap:nowrap;gap:6px"><button class="btn small" data-ed="${esc(d.id)}">수정</button><button class="btn small danger" data-del="${esc(d.id)}">삭제</button></div></td></tr>`).join("")}</tbody></table></div>`
       :`<div class="empty"><b>${q?"검색 결과가 없습니다":"등록된 기사님이 없습니다"}</b>${q?"":"왼쪽(폰은 위쪽)에서 이름과 처음 PIN을 넣어 등록해 주세요."}</div>`}
     </section>
@@ -177,7 +178,7 @@ function renderReg(v){
   v.querySelector("#doff").onchange=ev=>{S.showOff=ev.target.checked;render()};
   if(v.querySelector("#dcancel"))v.querySelector("#dcancel").onclick=()=>{S.drvEdit=null;render()};
   v.querySelector("#df").onsubmit=async ev=>{ev.preventDefault();const $=id=>v.querySelector("#"+id).value.trim();const name=$("dn");
-    const p={name,manager:$("dm"),login_id:$("dl")||name,pin:$("dp"),phone:$("dph"),car_no:$("dc"),note:$("dno")};
+    const p={name,manager:$("dm"),login_id:$("dl")||name,pin:$("dp"),phone:$("dph"),car_no:$("dc"),note:$("dno"),rate_per_run:num($("drp")),rate_fuel:num($("drf"))};
     if(e){p.id=e.id;p.active=v.querySelector("#da").checked}
     try{await rpc("lg_driver_save",{p_token:S.token,p_driver:p});await reloadDrivers();S.drvEdit=null;
       toast(e?`${name} 기사님 정보를 저장했습니다`:`${name} 기사님을 등록했습니다 · 아이디 ${p.login_id} / PIN ${p.pin}`);render()}
@@ -214,8 +215,8 @@ function renderList(v){
 /* ---------- 단가 미입력 알림 / 일괄 적용 ---------- */
 function noRateBanner(){
   const miss=S.trips.filter(t=>!num(t.per_run)&&!num(t.fuel));if(!miss.length)return "";
-  const can=miss.filter(t=>S.rates[t.dest]).length;
-  return `<div class="banner row" style="justify-content:space-between"><span style="flex:1 1 240px">금액이 비어 있는 운행 <b>${miss.length}건</b>이 있습니다.${can?` 그중 ${can}건은 단가표로 채울 수 있습니다.`:" 단가 메뉴에서 납품거래처 단가를 먼저 넣어 주세요."}</span>
+  const can=miss.filter(t=>{const r=S.rates[t.driver_id];return r&&(num(r.per_run)||num(r.fuel))}).length;
+  return `<div class="banner row" style="justify-content:space-between"><span style="flex:1 1 240px">금액이 비어 있는 운행 <b>${miss.length}건</b>이 있습니다.${can?` 그중 ${can}건은 기사님 단가로 채울 수 있습니다.`:" 단가 메뉴에서 기사님별 단가를 먼저 넣어 주세요."}</span>
     ${can?'<button class="btn primary small" id="applyRates" style="flex:0 0 auto">단가 일괄 적용</button>':'<button class="btn small" id="goRate" style="flex:0 0 auto">단가 넣으러 가기</button>'}</div>`;
 }
 function bindNoRate(v){
@@ -223,29 +224,30 @@ function bindNoRate(v){
   const g=v.querySelector("#goRate");if(g)g.onclick=()=>go("rate");
 }
 
-/* ---------- 납품거래처 단가 ---------- */
+/* ---------- 기사님별 단가 ---------- */
 function renderRate(v){
-  const list=[...DESTS,...Object.keys(S.rates).filter(d=>!DESTS.includes(d))];
-  const dr=S.rateDraft||(S.rateDraft=Object.fromEntries(list.map(d=>[d,{per_run:S.rates[d]?.per_run??"",fuel:S.rates[d]?.fuel??""}])));
-  const cnt=d=>S.trips.filter(t=>t.dest===d).reduce((a,t)=>a+num(t.cnt),0);
-  v.innerHTML=`<div class="row"><h3 style="flex:1">납품거래처 단가</h3></div>
-  <p class="muted" style="margin:0">기사님이 운행을 입력하면 여기 단가(1회 기준)가 자동으로 붙습니다. 기사님 화면에는 금액이 보이지 않습니다. 야간수당이나 예외 금액은 '운행 내역'에서 건별로 고치면 됩니다.</p>
+  const per={};S.trips.forEach(t=>{const p=per[t.driver_id]||(per[t.driver_id]={cnt:0,miss:0});p.cnt+=num(t.cnt);if(!num(t.per_run)&&!num(t.fuel))p.miss++});
+  const list=sortedDrivers(true).filter(d=>d.active||per[d.id]);
+  const dr=S.rateDraft||(S.rateDraft=Object.fromEntries(list.map(d=>[d.id,{per_run:num(S.rates[d.id]?.per_run)||"",fuel:num(S.rates[d.id]?.fuel)||""}])));
+  const mo=Number(S.month.slice(5));
+  v.innerHTML=`<div class="row"><h3 style="flex:1">기사님별 단가</h3></div>
+  <p class="muted" style="margin:0">기사님마다 1회 기준 회당운행비·유류비지원금을 정해 두면, 그 기사님이 입력한 운행에 자동으로 붙습니다. 기사님 화면에는 금액이 보이지 않습니다. 야간수당이나 예외 금액은 '운행 내역'에서 건별로 고치면 됩니다.</p>
   <form id="rf" class="card stack" style="gap:10px">
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>납품거래처</th><th class="n">회당운행비</th><th class="n">유류비지원금(회당)</th><th class="n">이달 납품</th></tr></thead><tbody>
-    ${list.map((d,i)=>`<tr><td class="wrap" style="min-width:140px">${esc(d)}${DESTS.includes(d)?"":' <span class="chip off">목록에 없음</span>'}</td>
-      <td><input type="number" inputmode="numeric" min="0" step="100" data-i="${i}" data-k="per_run" value="${esc(dr[d].per_run)}" placeholder="0" style="min-width:110px;text-align:right"></td>
-      <td><input type="number" inputmode="numeric" min="0" step="100" data-i="${i}" data-k="fuel" value="${esc(dr[d].fuel)}" placeholder="0" style="min-width:110px;text-align:right"></td>
-      <td class="n">${cnt(d)}회</td></tr>`).join("")}</tbody></table></div>
-    <label class="check"><input type="checkbox" id="rApply" checked> 저장하면서 ${Number(S.month.slice(5))}월 운행 중 금액이 비어 있는 내역에 바로 적용</label>
-    <label class="check"><input type="checkbox" id="rOver"> ${Number(S.month.slice(5))}월 내역은 이미 들어간 금액도 새 단가로 바꾸기 (야간수당은 그대로)</label>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>기사님</th><th>담당</th><th class="n">회당운행비</th><th class="n">유류비지원금(회당)</th><th class="n">${mo}월 납품</th></tr></thead><tbody>
+    ${list.map(d=>`<tr><td class="wrap" style="min-width:80px"><b>${esc(d.name)}</b>${d.active?"":'<span class="chip off">중지</span>'}${per[d.id]?.miss?`<span class="chip warn">금액 없음 ${per[d.id].miss}건</span>`:""}</td><td>${esc(d.manager||"-")}</td>
+      <td><input type="number" inputmode="numeric" min="0" step="100" data-d="${esc(d.id)}" data-k="per_run" value="${esc(dr[d.id]?.per_run??"")}" placeholder="0" style="min-width:110px;text-align:right"></td>
+      <td><input type="number" inputmode="numeric" min="0" step="100" data-d="${esc(d.id)}" data-k="fuel" value="${esc(dr[d.id]?.fuel??"")}" placeholder="0" style="min-width:110px;text-align:right"></td>
+      <td class="n">${per[d.id]?.cnt||0}회</td></tr>`).join("")||'<tr><td colspan="5" class="muted">등록된 기사님이 없습니다.</td></tr>'}</tbody></table></div>
+    <label class="check"><input type="checkbox" id="rApply" checked> 저장하면서 ${mo}월 운행 중 금액이 비어 있는 내역에 바로 적용</label>
+    <label class="check"><input type="checkbox" id="rOver"> ${mo}월 내역은 이미 들어간 금액도 새 단가로 바꾸기 (야간수당은 그대로)</label>
     <div class="row"><button class="btn primary big" type="submit">단가 저장</button><button class="btn big" type="button" id="rReset">되돌리기</button></div>
   </form>`;
-  v.querySelectorAll("input[data-i]").forEach(inp=>inp.oninput=()=>{dr[list[inp.dataset.i]][inp.dataset.k]=inp.value});
+  v.querySelectorAll("input[data-d]").forEach(inp=>inp.oninput=()=>{(dr[inp.dataset.d]=dr[inp.dataset.d]||{})[inp.dataset.k]=inp.value});
   v.querySelector("#rReset").onclick=()=>{S.rateDraft=null;render()};
-  v.querySelector("#rf").onsubmit=async e=>{e.preventDefault();const btn=e.submitter||v.querySelector("#rf button[type=submit]");btn.disabled=true;
-    try{await rpc("lg_rates_save",{p_token:S.token,p_rates:list.map(d=>({dest:d,per_run:num(dr[d].per_run),fuel:num(dr[d].fuel)}))});
+  v.querySelector("#rf").onsubmit=async e=>{e.preventDefault();const btn=v.querySelector("#rf button[type=submit]");btn.disabled=true;
+    try{await rpc("lg_rates_save",{p_token:S.token,p_rates:list.map(d=>({driver_id:d.id,per_run:num(dr[d.id]?.per_run),fuel:num(dr[d.id]?.fuel)}))});
       let msg="단가를 저장했습니다";const over=v.querySelector("#rOver").checked;
-      if(v.querySelector("#rApply").checked||over){const n=await rpc("lg_rates_apply",{p_token:S.token,p_month:S.month,p_overwrite:over});msg+=` · ${Number(S.month.slice(5))}월 ${n}건 적용`}
+      if(v.querySelector("#rApply").checked||over){const n=await rpc("lg_rates_apply",{p_token:S.token,p_month:S.month,p_overwrite:over});msg+=` · ${mo}월 ${n}건 적용`}
       toast(msg);S.rateDraft=null;await load()}catch(err){btn.disabled=false;toast(err.message)}};
 }
 
