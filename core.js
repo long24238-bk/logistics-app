@@ -15,7 +15,7 @@ async function rpc(fn,args={}){
   if(!CFG.SUPABASE_KEY.startsWith("sb_"))h.Authorization="Bearer "+CFG.SUPABASE_KEY;
   let r;try{r=await fetch(String(CFG.SUPABASE_URL).trim().replace(/\/+$/,"").replace(/\/rest\/v1$/,"")+"/rest/v1/rpc/"+fn,{method:"POST",headers:h,body:JSON.stringify(args)})}catch(e){throw new AppErr("NETWORK")}
   const t=await r.text();let j=null;try{j=t?JSON.parse(t):null}catch(e){}
-  if(!r.ok){const m=(j&&j.message)||"";const code=Object.keys(ERR).find(k=>m.includes(k));if(code==="SESSION_EXPIRED")onSessionExpired();throw new AppErr(code||m||("오류 "+r.status))}
+  if(!r.ok){const m=(j&&j.message)||"";const rm=m.match(/ROW_ERROR (\d+) (.*)/);if(rm){const c2=Object.keys(ERR).find(k=>rm[2].includes(k));const e=new AppErr("ROW_ERROR");e.message=`${rm[1]}번째 줄: ${c2?ERR[c2]:rm[2]}`;e.row=Number(rm[1]);throw e}const code=Object.keys(ERR).find(k=>m.includes(k));if(code==="SESSION_EXPIRED")onSessionExpired();throw new AppErr(code||m||("오류 "+r.status))}
   if(j&&j.error)throw new AppErr(j.error);
   return j;
 }
@@ -61,6 +61,9 @@ const Demo={
     else{f.per_run=old.per_run;f.per_run2=old.per_run2||0;f.fuel=old.fuel;f.night=old.night}
     if(old){const od=old.driver_id,odt=old.trip_date;Object.assign(old,f,{driver_id:did,trip_date:p_trip.trip_date,updated_at:now});this.retier(d,did,old.trip_date);this.retier(d,od,odt);return this.hide(s,old)}
     const t={id:this.uid(),driver_id:did,trip_date:p_trip.trip_date,...f,cnt_hi:0,entered_by:s.role,created_at:now,updated_at:now};d.trips.push(t);this.retier(d,did,t.trip_date);return this.hide(s,t)},
+  lg_trips_import(d,{p_token,p_rows}){this.auth(d,p_token,"admin");const backup=JSON.stringify(d.trips);let i=0;
+    try{(p_rows||[]).forEach(r=>{i++;const x={...r};delete x.id;this.lg_trip_save(d,{p_token,p_trip:x})})}
+    catch(e){d.trips=JSON.parse(backup);const er=new AppErr("ROW_ERROR");er.message=`${i}번째 줄: ${e.message}`;er.row=i;throw er}return i},
   lg_rates_list(d,{p_token}){this.auth(d,p_token,"admin");return d.drivers.map(x=>({driver_id:x.id,per_run:x.rate_per_run||0,fuel:x.rate_fuel||0,limit:x.rate_limit||0,per_run2:x.rate_per_run2||0}))},
   lg_rates_save(d,{p_token,p_rates}){this.auth(d,p_token,"admin");(p_rates||[]).forEach(r=>{const x=d.drivers.find(y=>y.id===r.driver_id);if(x){x.rate_per_run=num(r.per_run);x.rate_fuel=num(r.fuel);x.rate_limit=num(r.limit);x.rate_per_run2=num(r.per_run2)}})},
   lg_rates_apply(d,{p_token,p_month,p_overwrite}){this.auth(d,p_token,"admin");let n=0;d.trips.forEach(t=>{const x=d.drivers.find(y=>y.id===t.driver_id);if(x&&(x.rate_per_run||x.rate_fuel)&&t.trip_date.slice(0,7)===p_month&&(p_overwrite||(!t.per_run&&!t.fuel))){t.per_run=x.rate_per_run||0;t.fuel=x.rate_fuel||0;t.per_run2=num(x.rate_limit)>0?num(x.rate_per_run2):0;n++}

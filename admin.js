@@ -3,7 +3,7 @@ const AdminApp=(()=>{
 
 /* 관리자 화면: 대시보드 / 기사님 등록 / 운행 내역(대리 입력) / 설정 */
 const TABS=[["dash","대시보드","dash"],["list","운행 내역","list"],["rate","단가","won"],["reg","기사님","userplus"],["me","설정","me"]];
-const S={rates:{},rateDraft:null,drvDel:null,user:null,token:null,tab:"dash",month:ym(new Date()),trips:[],drivers:[],places:[],summary:[],loading:false,err:"",
+const S={imp:null,rates:{},rateDraft:null,drvDel:null,user:null,token:null,tab:"dash",month:ym(new Date()),trips:[],drivers:[],places:[],summary:[],loading:false,err:"",
   filter:"",panel:null,form:null,drvEdit:null,showOff:false,q:""};
 const drv=id=>S.drivers.find(d=>d.id===id);
 const sortedDrivers=all=>[...S.drivers].filter(d=>all||d.active).sort((a,b)=>(a.manager||"").localeCompare(b.manager||"","ko")||(a.sort??0)-(b.sort??0)||a.name.localeCompare(b.name,"ko"));
@@ -188,14 +188,15 @@ function renderReg(v){
 
 /* ---------- 운행 내역 / 대리 입력 ---------- */
 function renderList(v){
+  if(S.panel==="import")return renderImport(v);
   if(S.panel){
     v.innerHTML=`<div class="row"><h3 style="flex:1">${S.panel==="new"?"기사님 대신 입력":"운행 내역 수정"}</h3></div><div id="fb" style="max-width:640px"></div>`;
     tripForm(v.querySelector("#fb"),{form:S.form,editing:S.panel==="new"?null:S.panel,places:S.places,drivers:sortedDrivers(true),rates:S.rates,token:S.token,
       onSaved:rec=>{LS.set("lg_admin_drv",rec.driver_id);S.panel=null;S.form=null;S.month=rec.trip_date.slice(0,7);load()},
       onDeleted:()=>{S.panel=null;S.form=null;load()},onCancel:()=>{S.panel=null;S.form=null;render()}});
     return}
-  const add=`<button class="btn primary" id="newTrip" style="flex:0 0 auto">+ 대신 입력</button>`;
-  if(S.loading){v.innerHTML=monthBar(add)+loadingHtml;bindMonth(v);return}
+  const add=`<div class="row" style="flex:0 0 auto;gap:6px"><button class="btn" id="impTrip">엑셀로 입력</button><button class="btn primary" id="newTrip">+ 대신 입력</button></div>`;
+  if(S.loading){v.innerHTML=monthBar(add)+loadingHtml;bindMonth(v);v.querySelector("#impTrip").onclick=()=>{S.panel="import";S.imp=null;render()};v.querySelector("#newTrip").disabled=true;return}
   let trips=[...S.trips];if(S.filter)trips=trips.filter(t=>t.driver_id===S.filter);
   trips.sort((a,b)=>b.trip_date.localeCompare(a.trip_date)||String(b.created_at).localeCompare(String(a.created_at)));
   const sum=trips.reduce((s,t)=>s+calc(t).total,0),cnt=trips.reduce((s,t)=>s+num(t.cnt),0);
@@ -209,8 +210,112 @@ function renderList(v){
     </tbody></table></div><p class="muted" style="margin:8px 0 0">줄을 누르면 고치거나 지울 수 있습니다.</p>`:'<div class="empty"><b>이 달 내역이 없습니다</b>기사님이 폰으로 입력하면 여기에 쌓입니다.</div>'}</section>`;
   bindMonth(v);bindNoRate(v);
   v.querySelector("#flt").onchange=e=>{S.filter=e.target.value;render()};
+  v.querySelector("#impTrip").onclick=()=>{S.panel="import";S.imp=null;render();scrollTo(0,0)};
   v.querySelector("#newTrip").onclick=()=>{const last=S.filter||LS.get("lg_admin_drv");S.form=blankTrip(S.month,drv(last)?.active?last:"");S.panel="new";render();scrollTo(0,0)};
   v.querySelectorAll("tr[data-id]").forEach(r=>r.onclick=()=>{S.form={...S.trips.find(t=>t.id===r.dataset.id)};S.panel=r.dataset.id;render();scrollTo(0,0)});
+}
+
+/* ---------- 엑셀로 한꺼번에 입력 ---------- */
+const IMP_COLS=["운행일","기사님","출발지명","납품거래처","경유1","경유2","경유3","경유4","횟수","운행 시작시간","운행 종료시간","회당운행비","유류비지원금","야간수당","비고"];
+const IMP_ALIAS={trip_date:["운행일","날짜","일자","운행일자"],driver:["기사님","기사","기사명","기사 이름","이름"],from_name:["출발지명","출발지"],dest:["납품거래처","납품처","거래처"],
+  via1:["경유1"],via2:["경유2"],via3:["경유3"],via4:["경유4"],cnt:["횟수","납품 횟수","납품횟수","회수"],start_time:["운행 시작시간","시작시간","운행시작","시작"],end_time:["운행 종료시간","종료시간","운행종료","종료"],
+  per_run:["회당운행비","운행단가","단가"],fuel:["유류비지원금","유류비"],night:["야간수당","야간"],memo:["비고","메모"]};
+function impTemplate(){
+  if(typeof XLSX==="undefined")return toast("엑셀 도구를 불러오지 못했습니다");
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet([IMP_COLS]);ws["!cols"]=IMP_COLS.map(h=>({wch:Math.max(10,h.length*2+2)}));XLSX.utils.book_append_sheet(wb,ws,"입력");
+  const act=sortedDrivers(false),n=Math.max(act.length,ORIGINS.length,DESTS.length);
+  const lst=[["기사님","출발지명","납품거래처"],...Array.from({length:n},(_,i)=>[act[i]?.name||"",ORIGINS[i]||"",DESTS[i]||""])];
+  const w2=XLSX.utils.aoa_to_sheet(lst);w2["!cols"]=[{wch:12},{wch:22},{wch:26}];XLSX.utils.book_append_sheet(wb,w2,"목록");
+  const guide=[["작성 방법"],["1. '입력' 시트 2번째 줄부터 한 줄에 운행 1건씩 적습니다."],["2. 운행일은 2026-11-20 처럼, 기사님·출발지명·납품거래처는 '목록' 시트의 이름 그대로 적습니다."],
+    ["3. 횟수를 비우면 1회로 들어갑니다."],["4. 회당운행비·유류비지원금을 비우면 그 기사님 단가가 자동으로 들어갑니다 (2단가 기사님은 2단가도 자동)."],
+    ["5. 다 적은 뒤 앱의 '엑셀로 입력'에서 이 파일을 올리면 미리보기로 확인하고 저장합니다."],["※ 앱에서 내려받은 엑셀의 '전체내역' 시트도 그대로 올릴 수 있습니다."]];
+  const w3=XLSX.utils.aoa_to_sheet(guide);w3["!cols"]=[{wch:90}];XLSX.utils.book_append_sheet(wb,w3,"안내");
+  const blob=new Blob([XLSX.write(wb,{type:"array",bookType:"xlsx"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="운행 일괄입력 양식.xlsx";document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);
+}
+function impDate(v){
+  if(v instanceof Date&&!isNaN(v))return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,"0")}-${String(v.getDate()).padStart(2,"0")}`;
+  if(typeof v==="number"&&v>20000&&v<80000){const d=new Date(Math.round((v-25569)*86400000));return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`}
+  const t=String(v??"").trim();let m=t.match(/^(\d{4})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
+  if(m)return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+  m=t.match(/^(\d{1,2})[.\-\/월\s]+(\d{1,2})/);if(m)return `${S.month.slice(0,4)}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
+  return "";
+}
+function impTime(v){
+  if(v instanceof Date&&!isNaN(v))return `${String(v.getHours()).padStart(2,"0")}:${String(v.getMinutes()).padStart(2,"0")}`;
+  if(typeof v==="number"&&v>=0&&v<1){const mm=Math.round(v*1440);return `${String(Math.floor(mm/60)).padStart(2,"0")}:${String(mm%60).padStart(2,"0")}`}
+  const m=String(v??"").trim().match(/^(\d{1,2})[:시]\s*(\d{1,2})?/);return m?`${m[1].padStart(2,"0")}:${String(m[2]||"0").padStart(2,"0")}`:"";
+}
+function impParse(buf,fileName){
+  const wb=XLSX.read(buf,{type:"array",cellDates:false});
+  // '입력' → '전체내역' → 첫 시트 순서로, 머리글 줄(운행일·기사님이 있는 줄)을 찾아 읽음
+  const names=[...wb.SheetNames].sort((a,b)=>(b==="입력")-(a==="입력")||(b==="전체내역")-(a==="전체내역"));
+  for(const sn of names){
+    const aoa=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:""});
+    const hi=aoa.findIndex(r=>r.some(c=>IMP_ALIAS.trip_date.includes(String(c).trim()))&&r.some(c=>IMP_ALIAS.driver.includes(String(c).trim())));
+    if(hi<0)continue;
+    const head=aoa[hi].map(c=>String(c).trim());const col={};
+    Object.entries(IMP_ALIAS).forEach(([k,al])=>{const i=head.findIndex(h=>al.includes(h));if(i>=0)col[k]=i});
+    if(col.dest===undefined){const i=head.indexOf("거래처");if(i>=0)col.dest=i}
+    const rows=[];
+    aoa.slice(hi+1).forEach((r,ri)=>{
+      const g=k=>col[k]===undefined?"":r[col[k]];
+      if(r.every(c=>String(c).trim()===""))return;
+      const name=String(g("driver")).trim();if(!name&&!String(g("trip_date")).trim())return;
+      const d=S.drivers.find(x=>x.name===name)||S.drivers.find(x=>x.login_id===name);
+      const rec={driver_id:d?.id||"",trip_date:impDate(g("trip_date")),from_name:String(g("from_name")).trim(),dest:String(g("dest")).trim(),
+        via1:String(g("via1")).trim(),via2:String(g("via2")).trim(),via3:String(g("via3")).trim(),via4:String(g("via4")).trim(),
+        cnt:String(g("cnt")).trim()===""?1:num(g("cnt")),start_time:impTime(g("start_time")),end_time:impTime(g("end_time")),memo:String(g("memo")).trim()};
+      if(String(g("per_run")).trim()!==""&&num(g("per_run"))>0)rec.per_run=num(g("per_run"));
+      if(String(g("fuel")).trim()!==""&&num(g("fuel"))>0)rec.fuel=num(g("fuel"));
+      if(String(g("night")).trim()!=="")rec.night=num(g("night"));
+      const errs=[],warns=[];
+      if(!d)errs.push(name?`'${name}' 기사님이 없습니다`:"기사님 이름이 없습니다");else if(!d.active)warns.push("사용 중지된 기사님");
+      if(!rec.trip_date||isNaN(new Date(rec.trip_date+"T00:00")))errs.push("운행일을 읽을 수 없습니다");
+      if(!rec.dest)errs.push("납품거래처가 없습니다");else if(!DESTS.includes(rec.dest))warns.push("납품거래처 목록에 없는 이름");
+      if(rec.from_name&&!ORIGINS.includes(rec.from_name))warns.push("출발지 목록에 없는 이름");
+      if(!(rec.cnt>0))errs.push("횟수가 0입니다");
+      if(rec.trip_date&&S.trips.some(t=>t.driver_id===rec.driver_id&&t.trip_date===rec.trip_date&&t.dest===rec.dest&&num(t.cnt)===rec.cnt))warns.push("같은 내역이 이미 있음");
+      rows.push({line:hi+ri+2,name,rec,errs,warns});
+    });
+    return {sheet:sn,file:fileName,rows};
+  }
+  throw new Error("머리글 줄(운행일·기사님)을 찾지 못했습니다. 양식 파일을 받아서 그 형식대로 적어 주세요.");
+}
+function renderImport(v){
+  const imp=S.imp;
+  const ok=imp?imp.rows.filter(r=>!r.errs.length):[],bad=imp?imp.rows.filter(r=>r.errs.length):[];
+  v.innerHTML=`<div class="row"><h3 style="flex:1">엑셀로 한꺼번에 입력</h3><button class="btn" id="impBack" style="flex:0 0 auto">← 운행 내역</button></div>
+  <section class="card stack" style="gap:10px">
+    <h2>1. 양식 받기</h2>
+    <p class="muted" style="margin:0">양식의 '입력' 시트에 한 줄에 운행 1건씩 적습니다. 회당운행비·유류비를 비우면 기사님 단가가 자동으로 들어갑니다. 앱에서 받은 엑셀의 '전체내역' 시트도 올릴 수 있습니다.</p>
+    <div class="row" style="justify-content:flex-start"><button class="btn" id="impTpl" style="flex:0 0 auto">입력 양식 내려받기</button></div>
+    <h2>2. 다 적은 엑셀 올리기</h2>
+    <label class="btn primary" style="flex-direction:row;justify-content:center;color:var(--accent-fg);max-width:320px">엑셀 파일 선택<input type="file" id="impFile" accept=".xlsx,.xls,.csv" hidden></label>
+  </section>
+  ${imp?`<section class="card stack" style="gap:10px">
+    <h2>3. 확인하고 저장 — ${esc(imp.file)} · '${esc(imp.sheet)}' 시트</h2>
+    <div class="row" style="justify-content:flex-start;gap:8px"><span class="chip ok" style="margin:0;font-size:13px;padding:3px 10px;flex:0 0 auto">저장 가능 ${ok.length}건 · ${ok.reduce((a,r)=>a+num(r.rec.cnt),0)}회</span>${bad.length?`<span class="chip warn" style="margin:0;font-size:13px;padding:3px 10px;color:var(--bad);flex:0 0 auto">오류 ${bad.length}건 (저장 안 됨)</span>`:""}</div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>엑셀 줄</th><th>상태</th><th>운행일</th><th>기사님</th><th>출발지 → 납품거래처</th><th class="n">횟수</th><th class="n">회당운행비</th><th class="n">유류비</th><th class="n">야간</th><th>비고</th></tr></thead><tbody>
+    ${imp.rows.map(r=>`<tr><td class="n">${r.line}</td><td class="wrap" style="min-width:120px">${r.errs.length?`<span style="color:var(--bad)">✕ ${esc(r.errs.join(", "))}</span>`:r.warns.length?`<span style="color:var(--amber)">확인: ${esc(r.warns.join(", "))}</span>`:'<span style="color:var(--good)">✓</span>'}</td>
+      <td>${esc(r.rec.trip_date||"?")}</td><td>${esc(r.name||"?")}</td><td class="wrap" style="min-width:160px">${esc([r.rec.from_name,r.rec.via1,r.rec.via2,r.rec.via3,r.rec.via4,r.rec.dest].filter(Boolean).join(" → "))}</td>
+      <td class="n">${num(r.rec.cnt)}</td><td class="n">${r.rec.per_run!=null?won(r.rec.per_run):'<span class="muted">단가 자동</span>'}</td><td class="n">${r.rec.fuel!=null?won(r.rec.fuel):'<span class="muted">자동</span>'}</td><td class="n">${r.rec.night!=null?won(r.rec.night):"0"}</td><td class="wrap">${esc(r.rec.memo)}</td></tr>`).join("")||'<tr><td colspan="10" class="muted">읽은 줄이 없습니다.</td></tr>'}
+    </tbody></table></div>
+    <p class="err" id="impErr"></p>
+    <div class="row"><button class="btn primary big" id="impSave" ${ok.length?"":"disabled"}>${bad.length?`오류 줄은 빼고 ${ok.length}건 저장`:`${ok.length}건 저장`}</button><button class="btn big" id="impClear">다시 올리기</button></div>
+  </section>`:""}`;
+  v.querySelector("#impBack").onclick=()=>{S.panel=null;S.imp=null;render()};
+  v.querySelector("#impTpl").onclick=impTemplate;
+  v.querySelector("#impFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;
+    if(typeof XLSX==="undefined")return toast("엑셀 도구를 불러오지 못했습니다");
+    try{S.imp=impParse(await f.arrayBuffer(),f.name);render()}catch(err){toast(err.message||"엑셀 파일을 읽지 못했습니다")}};
+  const c=v.querySelector("#impClear");if(c)c.onclick=()=>{S.imp=null;render()};
+  const sv=v.querySelector("#impSave");if(sv)sv.onclick=async()=>{sv.disabled=true;
+    try{const n=await rpc("lg_trips_import",{p_token:S.token,p_rows:ok.map(r=>r.rec)});
+      const months=[...new Set(ok.map(r=>r.rec.trip_date.slice(0,7)))].sort();toast(`${n}건을 저장했습니다`);
+      S.panel=null;S.imp=null;if(!months.includes(S.month))S.month=months[months.length-1];await load()}
+    catch(err){sv.disabled=false;v.querySelector("#impErr").textContent=err.row?`${err.message} (미리보기의 ${ok[err.row-1]?.line??"?"}번째 엑셀 줄) — 아무것도 저장되지 않았습니다.`:err.message}};
 }
 
 /* ---------- 단가 미입력 알림 / 일괄 적용 ---------- */
