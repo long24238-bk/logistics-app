@@ -1,7 +1,7 @@
 // Supabase 연결 정보 — Supabase 대시보드 → Project Settings → API 에서 복사해 붙여 넣으세요.
 // 비워 두면 '데모 모드'로 동작합니다 (이 기기에만 저장되는 연습용).
 window.LG_CONFIG = {
-  SUPABASE_URL: "https://wdxoqoleeegahadhzhxf.supabase.co/rest/v1/"
+  SUPABASE_URL: "https://wdxoqoleeegahadhzhxf.supabase.co",
   SUPABASE_KEY: "sb_publishable_xEe_wgDb_QOvUszHwyEYSw_2HGsav9_"
 };
 
