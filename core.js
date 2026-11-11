@@ -52,19 +52,19 @@ const Demo={
   lg_trip_save(d,{p_token,p_trip}){const s=this.auth(d,p_token);const did=s.role==="admin"?p_trip.driver_id:s.uid;
     if(!d.drivers.find(x=>x.id===did))throw new AppErr("NO_DRIVER");if(!p_trip.trip_date)throw new AppErr("NO_DATE");
     const f={};["from_name","client","dest","via1","via2","via3","via4","start_time","end_time","memo"].forEach(k=>f[k]=p_trip[k]||"");f.cnt=parseInt(p_trip.cnt??1)||0;
-    const rate=(d.rates||{})[f.dest]||{};const now=new Date().toISOString();
+    const dv=d.drivers.find(x=>x.id===did)||{},rate={per_run:dv.rate_per_run||0,fuel:dv.rate_fuel||0};const now=new Date().toISOString();
     const old=p_trip.id?d.trips.find(x=>x.id===p_trip.id&&(s.role==="admin"||x.driver_id===s.uid)):null;if(p_trip.id&&!old)throw new AppErr("NOT_FOUND");
     if(s.role==="admin"){f.per_run=p_trip.per_run!=null?Number(p_trip.per_run)||0:Number(rate.per_run)||0;f.fuel=p_trip.fuel!=null?Number(p_trip.fuel)||0:Number(rate.fuel)||0;f.night=Number(p_trip.night)||0}
-    else if(!old||old.dest!==f.dest){f.per_run=Number(rate.per_run)||0;f.fuel=Number(rate.fuel)||0;f.night=old?old.night:0}
+    else if(!old||(!old.per_run&&!old.fuel)){f.per_run=Number(rate.per_run)||0;f.fuel=Number(rate.fuel)||0;f.night=old?old.night:0}
     else{f.per_run=old.per_run;f.fuel=old.fuel;f.night=old.night}
     if(old){Object.assign(old,f,{driver_id:did,trip_date:p_trip.trip_date,updated_at:now});return this.hide(s,old)}
     const t={id:this.uid(),driver_id:did,trip_date:p_trip.trip_date,...f,entered_by:s.role,created_at:now,updated_at:now};d.trips.push(t);return this.hide(s,t)},
-  lg_rates_list(d,{p_token}){this.auth(d,p_token,"admin");return Object.entries(d.rates||{}).map(([dest,r])=>({dest,per_run:r.per_run,fuel:r.fuel}))},
-  lg_rates_save(d,{p_token,p_rates}){this.auth(d,p_token,"admin");d.rates=d.rates||{};(p_rates||[]).forEach(r=>{if(!r.dest)return;if(!num(r.per_run)&&!num(r.fuel))delete d.rates[r.dest];else d.rates[r.dest]={per_run:num(r.per_run),fuel:num(r.fuel)}})},
-  lg_rates_apply(d,{p_token,p_month,p_overwrite}){this.auth(d,p_token,"admin");let n=0;d.trips.forEach(t=>{const r=(d.rates||{})[t.dest];if(r&&t.trip_date.slice(0,7)===p_month&&(p_overwrite||(!t.per_run&&!t.fuel))){t.per_run=r.per_run;t.fuel=r.fuel;n++}});return n},
+  lg_rates_list(d,{p_token}){this.auth(d,p_token,"admin");return d.drivers.map(x=>({driver_id:x.id,per_run:x.rate_per_run||0,fuel:x.rate_fuel||0}))},
+  lg_rates_save(d,{p_token,p_rates}){this.auth(d,p_token,"admin");(p_rates||[]).forEach(r=>{const x=d.drivers.find(y=>y.id===r.driver_id);if(x){x.rate_per_run=num(r.per_run);x.rate_fuel=num(r.fuel)}})},
+  lg_rates_apply(d,{p_token,p_month,p_overwrite}){this.auth(d,p_token,"admin");let n=0;d.trips.forEach(t=>{const x=d.drivers.find(y=>y.id===t.driver_id);if(x&&(x.rate_per_run||x.rate_fuel)&&t.trip_date.slice(0,7)===p_month&&(p_overwrite||(!t.per_run&&!t.fuel))){t.per_run=x.rate_per_run||0;t.fuel=x.rate_fuel||0;n++}});return n},
   lg_trip_delete(d,{p_token,p_id}){const s=this.auth(d,p_token);const i=d.trips.findIndex(x=>x.id===p_id&&(s.role==="admin"||x.driver_id===s.uid));if(i<0)throw new AppErr("NOT_FOUND");d.trips.splice(i,1)},
   lg_drivers_list(d,{p_token}){this.auth(d,p_token,"admin");return d.drivers.map(x=>({id:x.id,login_id:x.login_id,name:x.name,manager:x.manager,active:x.active,sort:x.sort,must_change:x.must_change,
-    phone:x.phone||"",car_no:x.car_no||"",note:x.note||"",locked:x.locked>Date.now(),created_at:x.created_at,
+    phone:x.phone||"",car_no:x.car_no||"",note:x.note||"",rate_per_run:x.rate_per_run||0,rate_fuel:x.rate_fuel||0,locked:x.locked>Date.now(),created_at:x.created_at,
     last_trip:d.trips.filter(t=>t.driver_id===x.id).map(t=>t.trip_date).sort().pop()||null,trip_count:d.trips.filter(t=>t.driver_id===x.id).length}))},
   lg_driver_delete(d,{p_token,p_id,p_with_trips}){this.auth(d,p_token,"admin");if(!d.drivers.find(x=>x.id===p_id))throw new AppErr("NOT_FOUND");
     if(d.trips.some(t=>t.driver_id===p_id)){if(!p_with_trips)throw new AppErr("HAS_TRIPS");d.trips=d.trips.filter(t=>t.driver_id!==p_id)}
@@ -72,7 +72,7 @@ const Demo={
   lg_driver_save(d,{p_token,p_driver:p}){this.auth(d,p_token,"admin");const pin=p.pin||null;
     if(pin&&!/^[0-9]{4,6}$/.test(pin))throw new AppErr("PIN_FORMAT");if(!String(p.login_id||"").trim()||!String(p.name||"").trim())throw new AppErr("REQUIRED");
     if(d.drivers.find(x=>x.login_id===p.login_id.trim()&&x.id!==p.id))throw new AppErr("DUP_LOGIN");
-    const extra={phone:(p.phone||"").trim(),car_no:(p.car_no||"").trim(),note:(p.note||"").trim()};
+    const extra={phone:(p.phone||"").trim(),car_no:(p.car_no||"").trim(),note:(p.note||"").trim()};if(p.rate_per_run!=null)extra.rate_per_run=num(p.rate_per_run);if(p.rate_fuel!=null)extra.rate_fuel=num(p.rate_fuel);
     if(!p.id){if(!pin)throw new AppErr("PIN_FORMAT");d.drivers.push({id:this.uid(),login_id:p.login_id.trim(),name:p.name.trim(),manager:(p.manager||"").trim(),pin,must_change:true,active:true,
       sort:p.sort||Math.max(0,...d.drivers.map(x=>x.sort||0))+1,fail:0,locked:0,created_at:new Date().toISOString(),...extra});return}
     const u=d.drivers.find(x=>x.id===p.id);Object.assign(u,{login_id:p.login_id.trim(),name:p.name.trim(),manager:(p.manager||"").trim(),...extra});
@@ -110,8 +110,8 @@ const FIELDS=["trip_date","from_name","dest","via1","via2","via3","via4","cnt","
 function sel(list,cur,ph){const opts=[...list];if(cur&&!opts.includes(cur))opts.push(cur);return `<option value="">${esc(ph)}</option>`+opts.map(x=>`<option value="${esc(x)}" ${x===cur?"selected":""}>${esc(x)}${list.includes(x)?"":" (목록에 없음)"}</option>`).join("")}
 function blankTrip(month,driverId){return{driver_id:driverId||"",trip_date:month===ym(new Date())?today():month+"-01",from_name:LS.get("lg_last_origin")||ORIGINS[0]||"",dest:"",via1:"",via2:"",via3:"",via4:"",cnt:1,per_run:"",fuel:"",start_time:"",end_time:"",night:"",memo:""}}
 function tripForm(box,o){
-  // 기사님: 운행 정보만 입력 (금액 칸 없음, 금액은 관리자 단가표로 자동)
-  // 관리자: 금액까지 입력. 납품거래처를 고르면 단가표 금액이 자동으로 채워짐
+  // 기사님: 운행 정보만 입력 (금액 칸 없음, 금액은 관리자가 정한 기사님별 단가로 자동)
+  // 관리자: 금액까지 입력. 기사님을 고르면 그 기사님 단가가 자동으로 채워짐
   const f=o.form,ed=!!o.editing,admin=!!o.drivers,rates=o.rates||{};let confirmDel=false;
   const FLD=admin?FIELDS:FIELDS.filter(k=>!["per_run","fuel","night"].includes(k));
   const draw=()=>{
@@ -139,9 +139,10 @@ function tripForm(box,o){
       if(admin){const c=calc(f);$("calc").innerHTML=`<span>운행비 합계 (${num(f.cnt)}회 × ${won(f.per_run)})</span><b>${won(c.run)}원</b><span>유류비합계 (${num(f.cnt)}회 × ${won(f.fuel)})</span><b>${won(c.fuel)}원</b><span>야간수당</span><b>${won(c.night)}원</b><span class="tot">정산액</span><b class="tot">${won(c.total)}원</b>`}
       else $("calc").innerHTML=`<span class="tot" style="border:0;padding:0;margin:0">${f.trip_date?esc(f.trip_date.slice(5).replace("-","/"))+" ("+dayName(f.trip_date)+") · ":""}${esc(f.dest||"납품거래처를 고르세요")}</span><b class="tot" style="border:0;padding:0;margin:0">${num(f.cnt)}회</b>`};
     const form=box.querySelector("form");form.addEventListener("input",upd);form.addEventListener("change",upd);
-    if(admin){let lastDest=f.dest;$("dest").addEventListener("change",()=>{const r=rates[$("dest").value],pr=rates[lastDest];
+    if(admin){let lastDrv=f.driver_id;const fill=(force)=>{const r=rates[$("driver_id").value],pr=rates[lastDrv];
       const blank=!num($("per_run").value)&&!num($("fuel").value),same=pr&&num($("per_run").value)===num(pr.per_run)&&num($("fuel").value)===num(pr.fuel);
-      if(r&&(blank||same)){$("per_run").value=r.per_run;$("fuel").value=r.fuel;toast("단가표 금액을 넣었습니다")}lastDest=$("dest").value;upd()});}
+      if(r&&(num(r.per_run)||num(r.fuel))&&(blank||same||force)){$("per_run").value=r.per_run;$("fuel").value=r.fuel;toast("이 기사님 단가를 넣었습니다")}lastDrv=$("driver_id").value;upd()};
+      $("driver_id").addEventListener("change",()=>fill(false));if(!ed&&f.driver_id&&!num(f.per_run)&&!num(f.fuel))fill(false);}
     upd();
     $("cm").onclick=()=>{$("cnt").value=Math.max(0,num($("cnt").value)-1);upd()};
     $("cp").onclick=()=>{$("cnt").value=num($("cnt").value)+1;upd()};
