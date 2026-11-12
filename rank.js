@@ -19,7 +19,14 @@
     '.rk-day b{font-size:13px;white-space:nowrap}',
     '.rk-day .rk-today{color:var(--accent,#e50049);font-size:11px;margin-left:3px}',
     '.rk-names{display:flex;flex-wrap:wrap;gap:4px}',
-    '.rk-names span{font-size:12px;padding:2px 8px;border-radius:999px;background:rgba(217,138,0,.18);color:#f0b54a}'
+    '.rk-names span{font-size:12px;padding:2px 8px;border-radius:999px;background:rgba(217,138,0,.18);color:#f0b54a}',
+    // 왼쪽 '기사님별 정산' 카드와 오른쪽 칸 높이 맞추기, 표가 카드 높이를 채우게
+    '.dash-grid{align-items:stretch!important}',
+    '.dash-grid>section.card:first-child{align-self:stretch!important}',
+    '.dash-grid>section.card:first-child .tbl-wrap{flex:1 1 auto;display:flex;overflow-x:visible}',
+    '.dash-grid>section.card:first-child .tbl-wrap>table{height:100%}',
+    '.dash-grid>.stack{display:flex;flex-direction:column}',
+    '.dash-grid>.stack>section.card:last-child{flex:1 1 auto}'
   ].join('\n');
 
   function addStyle() {
@@ -84,6 +91,18 @@
       });
 
     table.setAttribute(MARK, '1');
+
+    // 오른쪽 끝 막대그래프 칸과 범례(운행비·유류비·야간) 삭제 → 가로 스크롤 없이 한 화면에
+    var legend = sec.querySelector('.legend');
+    if (legend) legend.remove();
+    drivers.forEach(function (tr) {
+      var last = tr.lastElementChild;
+      if (last && last.querySelector('.minibar')) last.remove();
+    });
+    if (headRow && headRow.children.length > 8 && headRow.lastElementChild.textContent.trim() === '') headRow.lastElementChild.remove();
+    totals.forEach(function (tr) {
+      if (headRow && tr.children.length > headRow.children.length && tr.lastElementChild.textContent.trim() === '') tr.lastElementChild.remove();
+    });
 
     if (headRow && headRow.children.length >= 8) {
       var runTh = headRow.children[C_RUN];
