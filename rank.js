@@ -1,5 +1,5 @@
 // 대시보드 보강 (admin.js는 그대로 두고 화면만 고칩니다)
-// 1) '기사님별 정산' 표에 [순위] · [1회 평균](운행비 ÷ 횟수) 칸 추가
+// 1) '기사님별 정산' 표에 [순위] · [1회 평균](운행비 ÷ 횟수) 칸 추가, [건수] 칸 삭제, 좌우 카드 높이 맞춤
 // 2) '담당자별' 카드 숨김
 // 3) '이번 달 미입력 기사님' → '일별 미입력 기사님' (1일~오늘, 일요일 제외, 최근 날짜부터)
 // 대시보드가 다시 그려질 때마다(월 변경, 새로고침 등) 자동으로 다시 적용됩니다.
@@ -23,7 +23,9 @@
     // 왼쪽 '기사님별 정산' 카드와 오른쪽 칸 높이 맞추기, 표가 카드 높이를 채우게
     '.dash-grid{align-items:stretch!important}',
     '.dash-grid>section.card:first-child{align-self:stretch!important}',
-    '.dash-grid>section.card:first-child .tbl-wrap{flex:1 1 auto;display:flex;overflow-x:visible}',
+    '.dash-grid>section.card:first-child .tbl-wrap{flex:1 1 auto;display:flex}',
+    // 막대그래프 칸을 조금 좁혀 가로 스크롤 없이 한 화면에
+    'table[' + MARK + '] td:last-child[style*="width"]{width:80px!important}',
     '.dash-grid>section.card:first-child .tbl-wrap>table{height:100%}',
     '.dash-grid>.stack{display:flex;flex-direction:column}',
     '.dash-grid>.stack>section.card:last-child{flex:1 1 auto}'
@@ -55,10 +57,7 @@
     return null;
   }
 
-  /* ---------- 1) 순위 · 1회 평균 ---------- */
-  // 원래 열 순서: 기사님, 담당, 건수, 횟수, 운행비, 유류비, 야간, 정산액, (막대)
-  var C_TRIPS = 3, C_RUN = 4, C_AMT = 7;
-
+  /* ---------- 1) 순위 · 1회 평균 (건수 칸은 삭제, 막대그래프는 유지) ---------- */
   function cell(tag, cls, html) {
     var c = document.createElement(tag);
     if (cls) c.className = cls;
@@ -72,15 +71,22 @@
     if (!table || table.hasAttribute(MARK)) return;
 
     var headRow = table.querySelector('thead tr');
+    if (!headRow) return;
+    // 열 위치는 머리글 이름으로 찾음 (원래: 기사님, 담당, 건수, 횟수, 운행비, 유류비, 야간, 정산액, 막대)
+    var heads = Array.prototype.map.call(headRow.children, function (th) { return th.textContent.trim(); });
+    var iCnt = heads.indexOf('건수'), iTrips = heads.indexOf('횟수'), iRun = heads.indexOf('운행비'), iAmt = heads.indexOf('정산액');
+    if (iTrips < 0 || iRun < 0 || iAmt < 0) return;
+    var nCols = heads.length;
+
     var drivers = [], totals = [];
     Array.prototype.forEach.call(table.querySelectorAll('tbody tr, tfoot tr'), function (tr) {
-      if (tr.children.length < 8) return;
+      if (tr.children.length !== nCols) return; // 칸 수가 다른 줄은 건드리지 않음
       if (tr.children[0].textContent.trim() === '합계') totals.push(tr); else drivers.push(tr);
     });
     if (!drivers.length) return;
 
     var list = drivers.map(function (tr) {
-      return { tr: tr, amt: num(tr.children[C_AMT].textContent) };
+      return { tr: tr, amt: num(tr.children[iAmt].textContent) };
     });
     var prevAmt = null, prevRank = 0;
     list.filter(function (d) { return d.amt > 0; })
@@ -92,40 +98,25 @@
 
     table.setAttribute(MARK, '1');
 
-    // 오른쪽 끝 막대그래프 칸과 범례(운행비·유류비·야간) 삭제 → 가로 스크롤 없이 한 화면에
-    var legend = sec.querySelector('.legend');
-    if (legend) legend.remove();
-    drivers.forEach(function (tr) {
-      var last = tr.lastElementChild;
-      if (last && last.querySelector('.minibar')) last.remove();
-    });
-    if (headRow && headRow.children.length > 8 && headRow.lastElementChild.textContent.trim() === '') headRow.lastElementChild.remove();
-    totals.forEach(function (tr) {
-      if (headRow && tr.children.length > headRow.children.length && tr.lastElementChild.textContent.trim() === '') tr.lastElementChild.remove();
-    });
-
-    if (headRow && headRow.children.length >= 8) {
-      var runTh = headRow.children[C_RUN];
-      var avgTh = cell('th', 'n', '1회 평균');
-      avgTh.title = '운행비 ÷ 횟수';
-      runTh.parentNode.insertBefore(avgTh, runTh.nextSibling);
-      headRow.insertBefore(cell('th', 'rk-c', '순위'), headRow.firstChild);
+    // 줄마다: 운행비 뒤에 '1회 평균' 넣기 → '건수' 빼기 → 맨 앞에 '순위' 넣기
+    function fix(tr, isHead, rankHtml) {
+      var c = tr.children;
+      var trips = isHead ? 0 : num(c[iTrips].textContent);
+      var run = isHead ? 0 : num(c[iRun].textContent);
+      var avg = isHead ? cell('th', 'n', '1회 평균') : cell('td', 'n', trips > 0 ? won(run / trips) : '-');
+      if (isHead) avg.title = '운행비 ÷ 횟수';
+      c[iRun].parentNode.insertBefore(avg, c[iRun].nextSibling);
+      if (iCnt >= 0) c[iCnt].remove(); // 건수 칸 삭제 (iCnt < iRun 이라 위치 그대로)
+      tr.insertBefore(isHead ? cell('th', 'rk-c', '순위') : cell('td', 'rk-c', rankHtml), tr.firstChild);
     }
 
-    function addCells(tr, rankHtml) {
-      var trips = num(tr.children[C_TRIPS].textContent);
-      var run = num(tr.children[C_RUN].textContent);
-      var runTd = tr.children[C_RUN];
-      runTd.parentNode.insertBefore(cell('td', 'n', trips > 0 ? won(run / trips) : '-'), runTd.nextSibling);
-      tr.insertBefore(cell('td', 'rk-c', rankHtml), tr.firstChild);
-    }
-
+    fix(headRow, true);
     list.forEach(function (d) {
       var r = d.rank;
-      addCells(d.tr, r ? '<span class="rk-no' + (r <= 3 ? ' rk-' + r : '') + '">' + r + '</span>'
-                       : '<span class="rk-no rk-none">-</span>');
+      fix(d.tr, false, r ? '<span class="rk-no' + (r <= 3 ? ' rk-' + r : '') + '">' + r + '</span>'
+                         : '<span class="rk-no rk-none">-</span>');
     });
-    totals.forEach(function (tr) { addCells(tr, ''); });
+    totals.forEach(function (tr) { fix(tr, false, ''); });
   }
 
   /* ---------- 2) 담당자별 숨김 ---------- */
