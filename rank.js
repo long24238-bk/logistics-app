@@ -28,7 +28,23 @@
     'table[' + MARK + '] td:last-child[style*="width"]{width:80px!important}',
     '.dash-grid>section.card:first-child .tbl-wrap>table{height:100%}',
     '.dash-grid>.stack{display:flex;flex-direction:column}',
-    '.dash-grid>.stack>section.card:last-child{flex:1 1 auto}'
+    '.dash-grid>.stack>section.card:last-child{flex:1 1 auto}',
+    // 글자 크게: '기사님별 정산' 표와 '일별 미입력 기사님' (넓은 모니터에서 표에 맞게)
+    '.dash-grid h2{font-size:15px}',
+    'table[' + MARK + ']{font-size:16px}',
+    'table[' + MARK + '] th{font-size:14px}',
+    'table[' + MARK + '] td{padding:12px 10px}',
+    'table[' + MARK + '] tfoot td{font-size:17px}',
+    'table[' + MARK + '] .rk-no{width:28px;height:28px;font-size:14px}',
+    'table[' + MARK + '] th.rk-c,table[' + MARK + '] td.rk-c{width:52px}',
+    '.rk-days{gap:8px;max-height:460px}',
+    '.rk-day{grid-template-columns:128px 1fr;gap:10px;padding:10px 12px}',
+    '.rk-day b{font-size:16px}',
+    '.rk-day .rk-today{font-size:13px}',
+    // 한 줄에 5명까지 (좁은 화면은 3명)
+    '.rk-names{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}',
+    '.rk-names span{font-size:15px;padding:4px 8px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '@media (max-width:700px){.rk-names{grid-template-columns:repeat(3,minmax(0,1fr))}}'
   ].join('\n');
 
   function addStyle() {
@@ -179,7 +195,7 @@
     }
     if (!rows.length) return '<span class="muted">모든 날짜에 모든 기사님이 입력했습니다. (일요일 제외)</span>';
     return '<div class="rk-days">' + rows.join('') + '</div>' +
-      '<span class="muted" style="font-size:12px">일요일 제외 · 사용 중인 기사님 기준</span>';
+      '<span class="muted" style="font-size:13px">일요일 제외 · 사용 중인 기사님 기준</span>';
   }
 
   function updateMissing(force) {
